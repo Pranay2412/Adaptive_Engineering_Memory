@@ -1,8 +1,10 @@
 import json
 import os
+import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 from pathlib import Path
 
 from backend.bridge import build_cross_links
@@ -112,16 +114,54 @@ class BackendNormalizationTests(unittest.TestCase):
         self.assertEqual(parameters["rows"][0]["name"], "AuthService")
 
     def test_openai_key_is_passed_to_cognee_without_overriding_explicit_key(self):
-        with patch.dict(os.environ, {"OPENAI_API_KEY": "openai-secret"}, clear=True):
-            _prepare_cognee_environment()
-            self.assertEqual(os.environ["LLM_API_KEY"], "openai-secret")
-        with patch.dict(
-            os.environ,
-            {"OPENAI_API_KEY": "openai-secret", "LLM_API_KEY": "custom-key"},
-            clear=True,
+        fake_cognee = SimpleNamespace(
+            config=SimpleNamespace(
+                set_llm_config=Mock(),
+                set_embedding_config=Mock(),
+            )
+        )
+        with (
+            patch("backend.ingestion_docs.load_dotenv"),
+            patch.dict(sys.modules, {"cognee": fake_cognee}),
+            patch.dict(os.environ, {"OPENAI_API_KEY": "openai-secret"}, clear=True),
         ):
             _prepare_cognee_environment()
-            self.assertEqual(os.environ["LLM_API_KEY"], "custom-key")
+            self.assertEqual(os.environ["LLM_PROVIDER"], "openai")
+            self.assertEqual(os.environ["LLM_API_KEY"], "openai-secret")
+            self.assertNotIn("GEMINI_API_KEY", os.environ)
+            self.assertEqual(os.environ["EMBEDDING_PROVIDER"], "openai")
+            self.assertEqual(os.environ["EMBEDDING_API_KEY"], "openai-secret")
+            fake_cognee.config.set_llm_config.assert_called_with(
+                {
+                    "llm_provider": "openai",
+                    "llm_model": "gpt-4o-mini",
+                    "llm_api_key": "openai-secret",
+                }
+            )
+            fake_cognee.config.set_embedding_config.assert_called_with(
+                {
+                    "embedding_provider": "openai",
+                    "embedding_model": "openai/text-embedding-3-small",
+                    "embedding_api_key": "openai-secret",
+                }
+            )
+
+        with (
+            patch("backend.ingestion_docs.load_dotenv"),
+            patch.dict(sys.modules, {"cognee": fake_cognee}),
+            patch.dict(
+                os.environ,
+                {
+                    "GEMINI_API_KEY": "gemini-secret",
+                    "LLM_PROVIDER": "gemini",
+                },
+                clear=True,
+            ),
+        ):
+            _prepare_cognee_environment()
+            self.assertEqual(os.environ["LLM_PROVIDER"], "gemini")
+            self.assertEqual(os.environ["LLM_API_KEY"], "gemini-secret")
+            self.assertEqual(os.environ["EMBEDDING_PROVIDER"], "gemini")
 
 
 if __name__ == "__main__":

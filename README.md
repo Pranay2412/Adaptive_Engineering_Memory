@@ -37,14 +37,15 @@ NEO4J_URI=bolt://localhost:7687
 NEO4J_USERNAME=neo4j
 NEO4J_PASSWORD=replace-with-your-password
 
-GEMINI_API_KEY=replace-with-your-gemini-key
-LLM_PROVIDER=gemini
-LLM_MODEL=gemini/gemini-2.0-flash
-EMBEDDING_PROVIDER=gemini
-EMBEDDING_MODEL=gemini/text-embedding-004
+OPENAI_API_KEY=replace-with-your-openai-key
+# Optional overrides; OpenAI is selected automatically when this key is set.
+# LLM_PROVIDER=openai
+# LLM_MODEL=gpt-4o-mini
+# EMBEDDING_PROVIDER=openai
+# EMBEDDING_MODEL=openai/text-embedding-3-small
 ```
 
-`ingest_documents()` accepts `GEMINI_API_KEY`, `LLM_API_KEY`, or `OPENAI_API_KEY` as the credential source. It defaults to the Gemini provider and the models shown above; explicit `LLM_*` and `EMBEDDING_*` values take precedence.
+`ingest_documents()` selects OpenAI when `OPENAI_API_KEY` is available and no provider is explicitly selected. It uses `gpt-4o-mini` for LLM extraction and `openai/text-embedding-3-small` for embeddings by default. To use Gemini instead, set `GEMINI_API_KEY` and `LLM_PROVIDER=gemini`; `LLM_MODEL`, `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, and `EMBEDDING_API_KEY` can be used to override these defaults. A provider-specific key is preferred over the generic `LLM_API_KEY`.
 
 Cognee stores its system database separately from Neo4j. Set `SYSTEM_ROOT_DIRECTORY` to an absolute, stable directory if you want that data outside the Python installation. When migrating an existing installation, point it at the existing Cognee system directory first; do not accidentally upgrade a new, empty directory instead.
 
@@ -111,5 +112,5 @@ The tests cover Graphify JSON normalization, Cognee dataset scoping, cross-link 
 - **Neo4j connection refused:** confirm the container/server is running, Bolt is published on the configured port, and `NEO4J_URI` points to it. Test connectivity before running ingestion.
 - **`Relational DB Migrations failed` / `Bookkeeping schema missing`:** use `cognee-cli upgrade` and verify `SYSTEM_ROOT_DIRECTORY` points to the intended Cognee store.
 - **`Could not find lbug C API shared library` on Windows:** use Python 3.12 for this dependency set, then rerun the Cognee migration from the environment that will run the pipeline.
-- **Missing Gemini credentials:** provide `GEMINI_API_KEY` or `LLM_API_KEY` in `.env`. Never commit secrets.
+- **Missing model credentials:** provide `OPENAI_API_KEY` or `GEMINI_API_KEY` in `.env`, or set `LLM_API_KEY` with an explicit `LLM_PROVIDER`. Never commit secrets.
 - **Graphify output missing:** confirm Graphify is installed in the active environment and the repository path exists. The ingestion parser looks for `.graphify/graph.json` and `graphify-out/graph.json`.

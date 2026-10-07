@@ -55,51 +55,74 @@ def _has_dataset_provenance(properties: dict[str, Any], dataset_id: str) -> bool
 
 
 def _prepare_cognee_environment() -> None:
-    """
-    Configures Cognee environment variables to route LLM and embedding requests
-    through Google Gemini via LiteLLM.
-    """
+    """Configure Cognee's LLM and embedding providers from available API keys."""
     load_dotenv()
-    api_key = (
-        os.environ.get("GEMINI_API_KEY")
-        or os.environ.get("LLM_API_KEY")
-        or os.environ.get("OPENAI_API_KEY")
-    )
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    gemini_key = os.environ.get("GEMINI_API_KEY")
+    generic_key = os.environ.get("LLM_API_KEY")
+
+    llm_provider = os.environ.get("LLM_PROVIDER", "").strip().lower()
+    if not llm_provider:
+        llm_provider = "openai" if openai_key else "gemini"
+    elif llm_provider == "openai" and not openai_key and not generic_key and gemini_key:
+        llm_provider = "gemini"
+    elif llm_provider == "gemini" and not gemini_key and not generic_key and openai_key:
+        llm_provider = "openai"
+
+    provider_key = openai_key if llm_provider == "openai" else gemini_key if llm_provider == "gemini" else None
+    api_key = provider_key or generic_key or openai_key or gemini_key
     if not api_key:
         raise EnvironmentError(
-            "GEMINI_API_KEY or LLM_API_KEY is required in .env for Cognee document ingestion."
+            "Set OPENAI_API_KEY, GEMINI_API_KEY, or LLM_API_KEY for Cognee document ingestion."
         )
 
-    llm_provider = os.environ.get("LLM_PROVIDER", "gemini")
-    llm_model = os.environ.get("LLM_MODEL", "gemini/gemini-2.0-flash")
-    embedding_provider = os.environ.get("EMBEDDING_PROVIDER", "gemini")
-    embedding_model = os.environ.get("EMBEDDING_MODEL", "gemini/text-embedding-004")
+    default_llm_model = "gpt-4o-mini" if llm_provider == "openai" else "gemini/gemini-2.0-flash"
+    llm_model = os.environ.get("LLM_MODEL") or default_llm_model
+    if llm_provider == "openai" and llm_model.startswith("gemini/"):
+        llm_model = default_llm_model
 
-    # Pass configuration into environment for Cognee / LiteLLM
+    embedding_provider = os.environ.get("EMBEDDING_PROVIDER", llm_provider).strip().lower()
+    if embedding_provider == "openai" and not openai_key and not generic_key and gemini_key:
+        embedding_provider = "gemini"
+    elif embedding_provider == "gemini" and not gemini_key and not generic_key and openai_key:
+        embedding_provider = "openai"
+    embedding_key = (
+        os.environ.get("EMBEDDING_API_KEY")
+        or (openai_key if embedding_provider == "openai" else None)
+        or (gemini_key if embedding_provider == "gemini" else None)
+        or generic_key
+        or api_key
+    )
+    default_embedding_model = (
+        "openai/text-embedding-3-small"
+        if embedding_provider == "openai"
+        else "gemini/text-embedding-004"
+    )
+    embedding_model = os.environ.get("EMBEDDING_MODEL") or default_embedding_model
+    if embedding_provider == "openai" and embedding_model.startswith("gemini/"):
+        embedding_model = default_embedding_model
+
     os.environ["LLM_PROVIDER"] = llm_provider
     os.environ["LLM_MODEL"] = llm_model
     os.environ["LLM_API_KEY"] = api_key
-    os.environ["GEMINI_API_KEY"] = api_key
-
     os.environ["EMBEDDING_PROVIDER"] = embedding_provider
     os.environ["EMBEDDING_MODEL"] = embedding_model
-    os.environ["EMBEDDING_API_KEY"] = api_key
+    os.environ["EMBEDDING_API_KEY"] = embedding_key
 
     import cognee
     if hasattr(cognee, "config"):
         if hasattr(cognee.config, "set_llm_config"):
-            try:
-                cognee.config.set_llm_config({
-                    "llm_provider": llm_provider,
-                    "llm_model": llm_model,
-                    "llm_api_key": api_key,
-                })
-            except TypeError:
-                cognee.config.set_llm_config(
-                    llm_provider=llm_provider,
-                    llm_model=llm_model,
-                    llm_api_key=api_key,
-                )
+            cognee.config.set_llm_config({
+                "llm_provider": llm_provider,
+                "llm_model": llm_model,
+                "llm_api_key": api_key,
+            })
+        if hasattr(cognee.config, "set_embedding_config"):
+            cognee.config.set_embedding_config({
+                "embedding_provider": embedding_provider,
+                "embedding_model": embedding_model,
+                "embedding_api_key": embedding_key,
+            })
 
 
 def normalize_cognee_graph(
