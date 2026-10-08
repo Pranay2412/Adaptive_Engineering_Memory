@@ -299,7 +299,11 @@ class TestTokenOptimizationOrchestratorIntegration(unittest.TestCase):
             for i in range(8)
         ]
 
-        orchestrator = AdaptiveContextOrchestrator()
+        from backend.hybrid_retrieval import HybridRetrievalService
+        from backend.semantic_matcher import MockEmbeddingProvider
+
+        hybrid_service = HybridRetrievalService(embedding_provider=MockEmbeddingProvider())
+        orchestrator = AdaptiveContextOrchestrator(retrieval_service=hybrid_service)
         result = orchestrator.orchestrate(
             query="where is Service_0?",
             user_id="test_user",
@@ -357,7 +361,11 @@ class TestTokenOptimizationOrchestratorIntegration(unittest.TestCase):
             type="class",
             documentation="Handles user authentication and JWT validation.",
         )
-        orchestrator = AdaptiveContextOrchestrator()
+        from backend.hybrid_retrieval import HybridRetrievalService
+        from backend.semantic_matcher import MockEmbeddingProvider
+
+        hybrid_service = HybridRetrievalService(embedding_provider=MockEmbeddingProvider())
+        orchestrator = AdaptiveContextOrchestrator(retrieval_service=hybrid_service)
         result = orchestrator.orchestrate(
             query="how does AuthService work?",
             user_id="user1",

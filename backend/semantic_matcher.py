@@ -11,6 +11,8 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+load_dotenv()
+
 from .models import CodeSymbol, DocumentEntity
 
 
@@ -166,8 +168,7 @@ class OpenAIEmbeddingProvider(BaseEmbeddingProvider):
         api_key: str | None = None,
         model: str | None = None,
     ) -> None:
-        load_dotenv()
-        key = api_key or os.environ.get("OPENAI_API_KEY") or os.environ.get("EMBEDDING_API_KEY")
+        key = api_key or os.environ.get("OPENAI_API_KEY") or os.environ.get("EMBEDDING_API_KEY") or os.environ.get("LLM_API_KEY")
         if not key:
             raise EnvironmentError("OpenAI API key missing for OpenAIEmbeddingProvider.")
         raw_model = model or os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
@@ -191,8 +192,7 @@ class GeminiEmbeddingProvider(BaseEmbeddingProvider):
         api_key: str | None = None,
         model: str | None = None,
     ) -> None:
-        load_dotenv()
-        key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("EMBEDDING_API_KEY")
+        key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("EMBEDDING_API_KEY") or os.environ.get("LLM_API_KEY")
         if not key:
             raise EnvironmentError("Gemini API key missing for GeminiEmbeddingProvider.")
         raw_model = model or os.environ.get("EMBEDDING_MODEL", "text-embedding-004")
@@ -235,14 +235,15 @@ def get_embedding_provider(
     model: str | None = None,
 ) -> BaseEmbeddingProvider:
     """Resolve and instantiate an embedding provider based on configuration or environment."""
-    load_dotenv()
     name = (provider_name or os.environ.get("EMBEDDING_PROVIDER") or os.environ.get("LLM_PROVIDER") or "").strip().lower()
-
     if name == "mock":
         return MockEmbeddingProvider()
-    if name == "openai" or (not name and os.environ.get("OPENAI_API_KEY")):
+    has_openai_key = bool(os.environ.get("OPENAI_API_KEY") or (os.environ.get("LLM_PROVIDER") == "openai" and os.environ.get("LLM_API_KEY")))
+    has_gemini_key = bool(os.environ.get("GEMINI_API_KEY") or (os.environ.get("LLM_PROVIDER") == "gemini" and os.environ.get("LLM_API_KEY")))
+
+    if name == "openai" or (not name and has_openai_key):
         return OpenAIEmbeddingProvider(api_key=api_key, model=model)
-    if name == "gemini" or (not name and os.environ.get("GEMINI_API_KEY")):
+    if name == "gemini" or (not name and has_gemini_key):
         return GeminiEmbeddingProvider(api_key=api_key, model=model)
 
     return MockEmbeddingProvider()
