@@ -1,0 +1,6 @@
+Query,Category,Graphify_Context_Tokens,Synapse_Context_Tokens,Context_Reduction_%,Graphify_Input_Tokens,Synapse_Input_Tokens,Input_Reduction_%,Graphify_Total_Tokens,Synapse_Total_Tokens,Total_Reduction_%,Graphify_Latency_ms,Synapse_Latency_ms,Graphify_Has_Code,Synapse_Has_Code,Synapse_Has_Docs,Synapse_Has_ADR
+What modules import models.py?,structural,1471,766,47.93,1520,813,46.51,1577,893,43.37,5897.13,2773.31,True,True,True,True
+How does authentication work with JWT?,implementation,1441,905,37.2,1490,959,35.64,1542,1361,11.74,2035.52,6079.23,True,True,True,True
+Which components call the authentication service?,dependency,1441,844,41.43,1490,889,40.34,1596,1149,28.01,3588.49,4710.63,True,True,True,True
+Where could JWT verification fail and what code is involved?,debugging,1441,747,48.16,1494,797,46.65,1563,1052,32.69,2588.82,3542.25,True,True,True,True
+Why was RS256 chosen for authentication?,architecture,1478,850,42.49,1526,904,40.76,1581,1000,36.75,1552.1,2219.53,True,True,True,True
