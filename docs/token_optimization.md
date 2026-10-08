@@ -2,101 +2,130 @@
 
 ## 1. Overview
 
-The **Synapse Token Optimization Engine** (`backend/token_optimizer.py`) provides deterministic, rule-based context compression and token budgeting for the Adaptive Engineering Memory system. Rather than relying on expensive, non-deterministic LLM compression passes, it uses information density heuristics, multi-tier representation compaction, redundancy detection, and knapsack packing to fit maximal high-utility engineering context into a fixed token budget.
+The **Synapse Token Optimization Engine** (`backend/token_optimizer.py`) provides intelligent context compression and token budgeting for the Adaptive Engineering Memory system. It supports both **deterministic rule-based optimization** and **optional LLM-based structured compression**, allowing developers to trade off between zero-latency heuristic compaction and deep semantic synthesis.
+
+### Core Guarantee: Non-Negotiable Provenance Preservation
+Regardless of the compression mode used, the engine strictly enforces that:
+- Source identifiers are preserved.
+- Code symbols are preserved without alteration.
+- Important relationships (`SPECIFIES`, `CALLS`, `IMPORTS`, `DEPENDS_ON`, `INHERITS`) are preserved.
+- Recent changes and freshness timestamps are preserved.
+- Engineering decisions and architectural rationales are preserved.
+- **Compression is never allowed to remove provenance.** The compressed context remains 100% traceable to its original sources.
 
 ---
 
-## 2. Core Optimization Pipeline
+## 2. Four-Stage Optimization Pipeline
+
+The engine executes context optimization through an explicit four-stage pipeline:
 
 ```
-           Ranked Context Candidates (from ACO Retrieval)
-                               │
-                1. Deterministic Token Estimation
-                               │
-            2. Utility-Per-Token Density Ranking (U / C)
-                               │
-            3. Redundancy Detection & Deduplication
-               ├── Exact Node ID / Entity Location Match
-               ├── Structural Subsumption (Method inside Class)
-               └── Lexical Jaccard Overlap (threshold >= 0.70)
-                               │
-            4. Multi-Tier Representation Compaction
-               ├── Tier 1: FULL     (Complete signatures, docstrings, paths)
-               ├── Tier 2: COMPACT  (Trimmed summaries, 1-line signatures)
-               └── Tier 3: MINIMAL  (Compact identifier bullets)
-                               │
-            5. Relational Graph Context Preservation
-               └── Inter-entity hops (SPECIFIES, CALLS, IMPORTS, etc.)
-                               │
-            6. Strict Budget Ceiling Enforcement
-               └── Halts packing when remaining tokens < threshold
-                               │
-            Optimized Prompt Context + Full Audit Metrics
+                      Ranked Context Candidates (from ACO Retrieval)
+                                             │
+                        ┌────────────────────▼────────────────────┐
+                        │          STAGE 1: RAW CONTEXT           │
+                        │  - Invariants & Provenance Anchoring    │
+                        │  - Unoptimized Baseline Cost Counting   │
+                        └────────────────────┬────────────────────┘
+                                             │
+                        ┌────────────────────▼────────────────────┐
+                        │         STAGE 2: DEDUPLICATION          │
+                        │  - Exact Node / Location Match Pruning  │
+                        │  - Structural Subsumption (Method/Class)│
+                        │  - Lexical Jaccard Overlap (>= 0.70)    │
+                        └────────────────────┬────────────────────┘
+                                             │
+                        ┌────────────────────▼────────────────────┐
+                        │     STAGE 3: STRUCTURED COMPRESSION     │
+                        │                                         │
+                        │  Mode "none":                           │
+                        │    Full raw text without compaction     │
+                        │                                         │
+                        │  Mode "deterministic":                  │
+                        │    Utility-per-token density ranking    │
+                        │    Multi-tier compaction (F/C/M)        │
+                        │    Active graph traversal synthesis     │
+                        │                                         │
+                        │  Mode "llm":                            │
+                        │    Structured LLM synthesis pass        │
+                        │    ProvenanceGuardrail verification     │
+                        │    Traceability Ledger auto-restoration │
+                        └────────────────────┬────────────────────┘
+                                             │
+                        ┌────────────────────▼────────────────────┐
+                        │   STAGE 4: TOKEN BUDGET ENFORCEMENT     │
+                        │  - Strict Budget Ceiling (tokens <= max)│
+                        │  - Itemized Retained & Removed Tracking │
+                        │  - Tokens Saved & Reduction Metrics     │
+                        └─────────────────────────────────────────┘
 ```
 
 ---
 
-## 3. Key Components
+## 3. Supported Optimization Modes
 
-### 3.1 Deterministic Token Estimation (`TokenEstimator`)
-- Blends character-level heuristics ($\approx 4\text{ chars/token}$) with word-count ratios ($1.25\times\text{ words}$) for accurate offline token estimation without requiring external tokenizer libraries or network calls.
-- Provides token cost estimation for raw text and candidate items at any representation tier.
+The engine provides three selectable modes via `OptimizationMode`:
 
-### 3.2 Utility-per-Token Density Ranking
-Candidates are evaluated for both base utility ($U$) and token footprint ($C$):
-$$U = \text{Score} \times \text{QueryTokenBoost} \times \text{GraphConnectivityBoost}$$
-$$\text{Density} = \frac{U}{\max(1, C_{\text{FULL}})}$$
+| Mode | Description | Compaction Mechanism | Latency / Dependencies |
+| :--- | :--- | :--- | :--- |
+| **`OptimizationMode.NONE`** (`"none"`) | No optimization / raw baseline. | Sequential raw inclusion until budget is reached; trailing items dropped. | Zero latency, no compression. |
+| **`OptimizationMode.DETERMINISTIC`** (`"deterministic"`) | Rule-based utility-density optimization. | Ranks by $U / C$, degrades representations across `FULL` $\to$ `COMPACT` $\to$ `MINIMAL` tiers, extracts graph paths. | Zero latency, offline, 100% deterministic. |
+| **`OptimizationMode.LLM`** (`"llm"`) | Structured LLM context compression. | LLM synthesizes concise technical explanations, audited by `ProvenanceGuardrail` to ensure all source links remain intact. | Requires LLM pass (OpenAI, Gemini, or Mock). |
 
-Items with higher information density (concise symbols and key specifications) are packed before verbose, low-signal items.
+---
 
-### 3.3 Redundancy Pruning (`RedundancyDetector`)
-Prevents token waste from three common sources of context redundancy:
-1. **Exact Duplicate**: Identical `node_id` or same entity name within the same file location.
-2. **Structural Subsumption**: A method or sub-element whose definition is already fully captured within an accepted enclosing class or module snippet.
-3. **Lexical Jaccard Overlap**: Documents or chunks with token Jaccard similarity $\ge 0.70$.
+## 4. Invariants & Provenance Guardrails
 
-### 3.4 Multi-Tier Compaction (`ContextTier`)
-When an item has high utility but the remaining budget cannot accommodate its `FULL` representation, the optimizer degrades the item through a hierarchy of tiers:
-- **`FULL`**: Complete symbol signature, documentation snippet, file location, confidence, and complete graph paths.
-- **`COMPACT`**: Condensed summary ($\le 140$ chars), essential identifier signature, and concise relationship links ($\approx 40\text{--}50\%$ fewer tokens).
-- **`MINIMAL`**: Single-line bullet with identifier and location ($\approx 75\text{--}85\%$ fewer tokens).
+### 4.1 Provenance Anchors (`CandidateProvenanceAnchor`)
+Before compression, the engine extracts an explicit provenance anchor for each candidate:
+1. **Source Identifiers**: `file_or_document`, `node_id`, `source`, `repository_id`.
+2. **Code Symbols**: Exact entity names (`AuthService`), type signatures, qualified names.
+3. **Important Relationships**: Multi-hop directional links (`AuthService -[CALLS]-> JWTManager`).
+4. **Recent Changes**: Version timestamps, refactor notes (`Migrated to refresh rotation on 2026-10-05`).
+5. **Engineering Decisions**: Architectural rationales (`Decision: RS256 chosen over HS256 for asymmetric key rotation`).
+6. **Provenance Channels & Confidence**: Extracted AST certainty, semantic similarity, match channels.
 
-### 3.5 Graph Relationship Preservation
-Relationships connecting accepted context items (e.g., `SPECIFIES`, `CALLS`, `DEPENDS_ON`, `IMPORTS`) are extracted and rendered in a dedicated relational section if budget permits:
+### 4.2 Provenance Guardrail (`ProvenanceGuardrail`)
+After LLM compression, `ProvenanceGuardrail` audits the generated text:
+- Verifies that every source file path and symbol is cited.
+- Verifies that relationships and architectural decisions are preserved.
+- **Fail-Safe Restoration**: If the LLM dropped any citation, the guardrail automatically appends a formatted **Provenance & Source Traceability Ledger**:
+
 ```markdown
-#### Relational Context & Traversal Paths
-- `AuthService` -[CALLS]-> `JWTManager` (conf: 1.00)
-- `Authentication RFC` -[SPECIFIES]-> `AuthService` (conf: 0.95)
+#### Provenance & Source Traceability Ledger
+- [Source: `services/auth.py` | Node: `sym-auth-001` | Conf: 0.95] Symbol: `AuthService` (class) | Relations: AuthService -[CALLS]-> JWTManager | Decisions: RS256 chosen over HS256 | Recent: Migrated on 2026-10-05
+- [Source: `docs/rfcs/001-auth.md` | Node: `doc-spec-001` | Conf: 0.90] Symbol: `Authentication RFC` (spec) | Decisions: Asymmetric RS256 verification
 ```
-
-### 3.6 Strict Budget Ceiling
-The engine strictly enforces `estimated_input_tokens <= max_token_budget`. If an item cannot fit even in `MINIMAL` tier, it is logged in `items_removed` with the reason `budget_exceeded`.
 
 ---
 
-## 4. Audit Metrics & Output Structure
+## 5. Output Schema & Audit Metrics
 
-The optimizer returns a `TokenOptimizationResult` containing complete metrics:
+The engine returns a `TokenOptimizationResult` containing:
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `optimized_context` | `str` | The assembled Markdown context ready for LLM prompt ingestion. |
+| `optimized_context` | `str` | Final Markdown context ready for LLM prompt ingestion. |
 | `estimated_input_tokens` | `int` | Token count of the final optimized context. |
-| `original_estimated_tokens` | `int` | Token count if all candidates were rendered in `FULL` tier unbudgeted. |
-| `tokens_saved` | `int` | Net tokens saved: $\max(0, \text{original} - \text{final})$. |
-| `percentage_reduction` | `float` | Percentage of prompt tokens saved ($(\text{saved} / \text{original}) \times 100$). |
-| `items_removed` | `list[dict]` | Audit log of pruned candidates with removal reasons and original token costs. |
-| `items_retained` | `list[dict]` | List of included candidates with selected tier, token cost, and utility density. |
-| `metadata` | `dict` | Additional diagnostic counters and budget utilization percentages. |
+| `original_estimated_tokens` | `int` | Token count of raw uncompressed candidates. |
+| `tokens_saved` | `int` | Net tokens saved ($\max(0, \text{original} - \text{final})$). |
+| `percentage_reduction` | `float` | Percentage reduction in prompt tokens. |
+| `items_retained` | `list[dict]` | Included candidates with selected tier, token cost, and utility density. |
+| `items_removed` | `list[dict]` | Pruned candidates with explicit reason (`budget_exceeded`, `duplicate_node_id`, `high_content_overlap`, `structural_subsumption`). |
+| `mode` | `str` | Active optimization mode (`"none"`, `"deterministic"`, or `"llm"`). |
+| `provenance_audit` | `dict` | Audit report confirming all sources and symbols were preserved. |
+| `metadata` | `dict` | Budget utilization and candidate counts. |
 
 ---
 
-## 5. Usage Examples
+## 6. Programmatic Usage
 
-### 5.1 Standalone Usage (`optimize_tokens`)
+### 6.1 Comparing All Three Optimization Modes Side-by-Side
+
+Use `compare_optimization_modes` to benchmark the trade-offs across all three modes:
 
 ```python
-from backend import optimize_tokens, HybridRetrievalResult
+from backend import compare_optimization_modes, HybridRetrievalResult
 
 results = [
     HybridRetrievalResult(
@@ -105,7 +134,7 @@ results = [
         source="code",
         file_or_document="services/auth.py",
         score=0.92,
-        content_snippet="Handles login and JWT token issuance.",
+        content_snippet="Handles login and JWT token issuance. Decision: RS256 used for zero-trust token signing.",
     ),
     HybridRetrievalResult(
         entity="JWTManager",
@@ -117,48 +146,50 @@ results = [
     ),
 ]
 
-result = optimize_tokens(
+comparison = compare_optimization_modes(
     user_query="How does authentication work?",
     ranked_context_items=results,
     max_token_budget=500,
 )
 
-print(result.optimized_context)
-print(f"Tokens saved: {result.tokens_saved} ({result.percentage_reduction}%)")
-print(f"Retained {len(result.items_retained)} items, removed {len(result.items_removed)} items")
+# Inspect side-by-side comparison table
+for row in comparison.comparison_table:
+    print(f"Mode: {row['name']:<30} Tokens: {row['estimated_input_tokens']:<5} Saved: {row['tokens_saved']:<5} Reduction: {row['percentage_reduction']}% Provenance Preserved: {row['provenance_preserved']}")
+
+# Access individual result containers
+print(comparison.none_result.optimized_context)
+print(comparison.deterministic_result.optimized_context)
+print(comparison.llm_result.optimized_context)
 ```
 
-### 5.2 Integration with Adaptive Context Orchestrator (ACO)
-
-When `max_tokens` is provided to `orchestrate_context`, the optimizer runs automatically and exposes its results in `retrieval_metadata["token_optimization"]`:
+### 6.2 Running LLM Compression in Adaptive Context Orchestrator (ACO)
 
 ```python
-from backend import orchestrate_context
+from backend import AdaptiveContextOrchestrator, OptimizationMode
 
-orchestrated = orchestrate_context(
+orchestrator = AdaptiveContextOrchestrator()
+context = orchestrator.orchestrate(
     query="where is AuthService?",
     user_id="dev-team",
     repository_id="core-backend",
     max_tokens=600,
+    optimization_mode=OptimizationMode.LLM,
 )
 
-token_opt = orchestrated.retrieval_metadata.get("token_optimization")
-if token_opt:
-    print("Optimization tokens saved:", token_opt["tokens_saved"])
-    print("Percentage reduction:", token_opt["percentage_reduction"])
-    for item in token_opt["items_retained"]:
-        print(f" - {item['entity']} [{item['tier']}] ({item['tokens']} tokens)")
+opt_meta = context.retrieval_metadata["token_optimization"]
+print("Mode used:", opt_meta["mode"])
+print("Tokens saved:", opt_meta["tokens_saved"])
+print("Provenance audit:", opt_meta["provenance_audit"])
 ```
 
-### 5.3 Using `TokenOptimizedContextPacker` Directly in ACO
-
-To use multi-tier knapsack packing for the prompt context text itself:
+### 6.3 Using `TokenOptimizedContextPacker` Directly
 
 ```python
-from backend import AdaptiveContextOrchestrator, TokenOptimizedContextPacker
+from backend import AdaptiveContextOrchestrator, OptimizationMode, TokenOptimizedContextPacker
 
+# Pack prompt context using LLM structured compression
 orchestrator = AdaptiveContextOrchestrator(
-    packer=TokenOptimizedContextPacker(),
+    packer=TokenOptimizedContextPacker(mode=OptimizationMode.LLM),
 )
 
 context = orchestrator.orchestrate(

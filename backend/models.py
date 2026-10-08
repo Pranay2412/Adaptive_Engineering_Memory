@@ -998,6 +998,14 @@ class RemovedItemRecord:
         )
 
 
+class OptimizationMode(str, Enum):
+    """Supported token optimization modes for Synapse."""
+
+    NONE = "none"                      # No optimization / raw baseline under budget
+    DETERMINISTIC = "deterministic"    # Utility-density ranking, multi-tier compaction, redundancy pruning
+    LLM = "llm"                        # Structured LLM compression with provenance preservation
+
+
 @dataclass
 class TokenOptimizationResult:
     """Output from the Token Optimization Engine for Synapse."""
@@ -1009,6 +1017,8 @@ class TokenOptimizationResult:
     percentage_reduction: float
     items_removed: list[dict[str, Any]] = field(default_factory=list)
     items_retained: list[dict[str, Any]] = field(default_factory=list)
+    mode: str = "deterministic"
+    provenance_audit: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -1021,6 +1031,8 @@ class TokenOptimizationResult:
             "percentage_reduction": round(self.percentage_reduction, 2),
             "items_removed": list(self.items_removed),
             "items_retained": list(self.items_retained),
+            "mode": self.mode,
+            "provenance_audit": dict(self.provenance_audit),
             "metadata": dict(self.metadata),
         }
 
@@ -1035,6 +1047,46 @@ class TokenOptimizationResult:
             percentage_reduction=float(data.get("percentage_reduction", 0.0)),
             items_removed=list(data.get("items_removed", [])),
             items_retained=list(data.get("items_retained", [])),
+            mode=str(data.get("mode", "deterministic")),
+            provenance_audit=dict(data.get("provenance_audit", {})),
+            metadata=dict(data.get("metadata", {})),
+        )
+
+
+@dataclass
+class OptimizationComparison:
+    """Comparison of the three token optimization modes: None, Deterministic, and LLM."""
+
+    query: str
+    max_token_budget: int
+    none_result: TokenOptimizationResult
+    deterministic_result: TokenOptimizationResult
+    llm_result: TokenOptimizationResult
+    comparison_table: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize comparison to dictionary."""
+        return {
+            "query": self.query,
+            "max_token_budget": self.max_token_budget,
+            "none_result": self.none_result.to_dict(),
+            "deterministic_result": self.deterministic_result.to_dict(),
+            "llm_result": self.llm_result.to_dict(),
+            "comparison_table": list(self.comparison_table),
+            "metadata": dict(self.metadata),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> OptimizationComparison:
+        """Reconstruct comparison from dictionary representation."""
+        return cls(
+            query=str(data.get("query", "")),
+            max_token_budget=int(data.get("max_token_budget", 0)),
+            none_result=TokenOptimizationResult.from_dict(data.get("none_result", {})),
+            deterministic_result=TokenOptimizationResult.from_dict(data.get("deterministic_result", {})),
+            llm_result=TokenOptimizationResult.from_dict(data.get("llm_result", {})),
+            comparison_table=list(data.get("comparison_table", [])),
             metadata=dict(data.get("metadata", {})),
         )
 

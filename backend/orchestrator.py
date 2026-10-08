@@ -31,6 +31,7 @@ from .models import (
     GraphEdge,
     HybridRetrievalResult,
     IntentAnalysisResult,
+    OptimizationMode,
     OrchestratedContext,
     QueryIntent,
     RankingWeights,
@@ -50,7 +51,7 @@ from .ranking import (
     compute_source_reliability,
     compute_token_cost_efficiency,
 )
-from .token_optimizer import TokenOptimizationEngine
+from .token_optimizer import BaseLLMCompressor, TokenOptimizationEngine
 
 logger = logging.getLogger(__name__)
 
@@ -626,10 +627,17 @@ class AdaptiveContextPacker(BaseContextPacker):
 
 
 class TokenOptimizedContextPacker(BaseContextPacker):
-    """Context packer leveraging Synapse Token Optimization Engine for multi-tier knapsack packing."""
+    """Context packer leveraging Synapse Token Optimization Engine for multi-tier knapsack packing or LLM compression."""
 
-    def __init__(self, optimizer: TokenOptimizationEngine | None = None) -> None:
+    def __init__(
+        self,
+        optimizer: TokenOptimizationEngine | None = None,
+        mode: OptimizationMode | str = OptimizationMode.DETERMINISTIC,
+        llm_compressor: BaseLLMCompressor | None = None,
+    ) -> None:
         self.optimizer = optimizer or TokenOptimizationEngine()
+        self.mode = mode
+        self.llm_compressor = llm_compressor
 
     def pack(
         self,
@@ -637,7 +645,7 @@ class TokenOptimizedContextPacker(BaseContextPacker):
         intent_result: IntentAnalysisResult,
         token_budget: int | None = None,
     ) -> tuple[str, int]:
-        """Pack context using the deterministic TokenOptimizationEngine."""
+        """Pack context using the TokenOptimizationEngine in the configured mode."""
         budget = token_budget if token_budget is not None else 4000
         query_text = (
             ", ".join(intent_result.extracted_entities)
@@ -649,6 +657,8 @@ class TokenOptimizedContextPacker(BaseContextPacker):
             ranked_context_items=results,
             max_token_budget=budget,
             intent_result=intent_result,
+            mode=self.mode,
+            llm_compressor=self.llm_compressor,
         )
         return opt_res.optimized_context, opt_res.estimated_input_tokens
 
@@ -687,6 +697,8 @@ class AdaptiveContextOrchestrator:
         symbols: list[CodeSymbol] | None = None,
         entities: list[DocumentEntity] | None = None,
         edges: list[GraphEdge] | None = None,
+        optimization_mode: OptimizationMode | str = OptimizationMode.DETERMINISTIC,
+        llm_compressor: BaseLLMCompressor | None = None,
     ) -> OrchestratedContext:
         """Execute full ACO pipeline:
 
@@ -749,6 +761,8 @@ class AdaptiveContextOrchestrator:
                 ranked_context_items=deduped_results,
                 max_token_budget=max_tokens,
                 intent_result=intent_result,
+                mode=optimization_mode,
+                llm_compressor=llm_compressor,
             )
             token_opt_dict = opt_res.to_dict()
 
@@ -816,6 +830,8 @@ def orchestrate_context(
     ranker: BaseContextRanker | None = None,
     packer: BaseContextPacker | None = None,
     token_optimizer: TokenOptimizationEngine | None = None,
+    optimization_mode: OptimizationMode | str = OptimizationMode.DETERMINISTIC,
+    llm_compressor: BaseLLMCompressor | None = None,
 ) -> OrchestratedContext:
     """Convenience function to run the Adaptive Context Orchestrator."""
     orchestrator = AdaptiveContextOrchestrator(
@@ -833,4 +849,6 @@ def orchestrate_context(
         symbols=symbols,
         entities=entities,
         edges=edges,
+        optimization_mode=optimization_mode,
+        llm_compressor=llm_compressor,
     )

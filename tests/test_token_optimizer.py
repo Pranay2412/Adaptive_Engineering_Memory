@@ -345,6 +345,266 @@ class TestTokenOptimizationOrchestratorIntegration(unittest.TestCase):
         self.assertGreater(tokens, 0)
         self.assertLessEqual(tokens, 100)
 
+    def test_orchestrator_supports_llm_mode(self):
+        """Verify orchestrator runs in LLM compression mode and records mode in metadata."""
+        from backend.models import CodeSymbol, OptimizationMode
+        from backend.orchestrator import AdaptiveContextOrchestrator
+
+        sym = CodeSymbol(
+            id="s1",
+            name="AuthService",
+            file="services/auth.py",
+            type="class",
+            documentation="Handles user authentication and JWT validation.",
+        )
+        orchestrator = AdaptiveContextOrchestrator()
+        result = orchestrator.orchestrate(
+            query="how does AuthService work?",
+            user_id="user1",
+            repository_id="repo1",
+            max_tokens=400,
+            symbols=[sym],
+            optimization_mode=OptimizationMode.LLM,
+        )
+
+        opt_meta = result.retrieval_metadata.get("token_optimization", {})
+        self.assertEqual(opt_meta.get("mode"), "llm")
+        self.assertIn("AuthService", result.context_text)
+
+
+class TestProvenanceInvariants(unittest.TestCase):
+    """Test suite ensuring compression NEVER removes provenance and preserves invariants."""
+
+    def setUp(self):
+        from backend.models import RelationshipHop
+        self.item = HybridRetrievalResult(
+            entity="AuthService",
+            type="class",
+            source="code",
+            file_or_document="services/auth.py",
+            node_id="sym-auth-001",
+            confidence=0.95,
+            score=0.90,
+            content_snippet="Handles user authentication with RSA256 signature verification. Decision: RS256 chosen over HS256 for asymmetric key rotation.",
+            relationship_path=[
+                RelationshipHop("sym-auth-001", "AuthService", "CALLS", "sym-jwt-002", "JWTManager")
+            ],
+            metadata={
+                "engineering_decisions": ["RS256 chosen over HS256 for asymmetric key rotation"],
+                "recent_changes": ["Migrated to refresh token rotation on 2026-10-05"],
+            },
+        )
+
+    def test_extract_provenance_anchor(self):
+        """Verify provenance anchor extracts sources, symbols, relationships, changes, and decisions."""
+        from backend.token_optimizer import extract_provenance_anchor
+        anchor = extract_provenance_anchor(self.item)
+
+        self.assertEqual(anchor.entity, "AuthService")
+        self.assertEqual(anchor.file_or_document, "services/auth.py")
+        self.assertEqual(anchor.node_id, "sym-auth-001")
+        self.assertTrue(any("JWTManager" in r for r in anchor.relationships))
+        self.assertTrue(any("RS256" in d for d in anchor.engineering_decisions))
+        self.assertTrue(any("2026-10-05" in c for c in anchor.recent_changes))
+
+    def test_provenance_guardrail_detects_and_injects_ledger(self):
+        """Verify provenance guardrail detects dropped source/symbol and restores traceability ledger."""
+        from backend.token_optimizer import ProvenanceGuardrail
+
+        # Simulate poor LLM compression that omitted source file and symbol
+        bad_compressed_text = "Users authenticate via JWT token signatures."
+
+        guarded_text, audit = ProvenanceGuardrail.verify_and_guard(
+            compressed_text=bad_compressed_text,
+            candidates=[self.item],
+        )
+
+        self.assertTrue(audit["ledger_injected"])
+        self.assertIn("Provenance & Source Traceability Ledger", guarded_text)
+        self.assertIn("services/auth.py", guarded_text)
+        self.assertIn("AuthService", guarded_text)
+        self.assertTrue(audit["all_sources_preserved"])
+        self.assertTrue(audit["all_symbols_preserved"])
+
+    def test_never_allows_compression_to_remove_provenance(self):
+        """Verify LLM compression mode strictly preserves provenance traceability."""
+        from backend.models import OptimizationMode
+        from backend.token_optimizer import TokenOptimizationEngine
+
+        engine = TokenOptimizationEngine()
+        result = engine.optimize(
+            user_query="explain auth",
+            ranked_context_items=[self.item],
+            max_token_budget=500,
+            mode=OptimizationMode.LLM,
+        )
+
+        # Invariant checks:
+        self.assertIn("services/auth.py", result.optimized_context)
+        self.assertIn("AuthService", result.optimized_context)
+        self.assertIn("JWTManager", result.optimized_context)
+        self.assertTrue(result.provenance_audit.get("all_sources_preserved"))
+        self.assertTrue(result.provenance_audit.get("all_symbols_preserved"))
+
+
+class TestFourStagePipelineAndModes(unittest.TestCase):
+    """Test suite verifying: raw context -> deduplication -> structured compression -> token budget enforcement."""
+
+    def setUp(self):
+        self.items = [
+            HybridRetrievalResult(
+                entity="AuthService",
+                type="class",
+                source="code",
+                file_or_document="services/auth.py",
+                node_id="sym-auth-1",
+                score=0.92,
+                content_snippet="class AuthService: def login(): pass",
+            ),
+            # Redundant duplicate of item 1
+            HybridRetrievalResult(
+                entity="AuthService",
+                type="class",
+                source="code",
+                file_or_document="services/auth.py",
+                node_id="sym-auth-1",
+                score=0.90,
+                content_snippet="class AuthService: def login(): pass",
+            ),
+            HybridRetrievalResult(
+                entity="JWTManager",
+                type="class",
+                source="code",
+                file_or_document="security/jwt.py",
+                node_id="sym-jwt-2",
+                score=0.85,
+                content_snippet="class JWTManager: def verify(): pass",
+            ),
+        ]
+
+    def test_stage_two_deduplication_removes_duplicate(self):
+        """Verify Stage 2 deduplication removes duplicate items across all modes."""
+        from backend.models import OptimizationMode
+        from backend.token_optimizer import TokenOptimizationEngine
+
+        engine = TokenOptimizationEngine()
+        for mode in [OptimizationMode.NONE, OptimizationMode.DETERMINISTIC, OptimizationMode.LLM]:
+            res = engine.optimize("check auth", self.items, max_token_budget=800, mode=mode)
+            # The exact duplicate should be in items_removed
+            removed_entities = [r["entity"] for r in res.items_removed if "duplicate_node_id" in r["reason"]]
+            self.assertIn("AuthService", removed_entities)
+
+    def test_mode_none_raw_uncompressed_under_budget(self):
+        """Verify OptimizationMode.NONE keeps full raw representation and enforces budget ceiling."""
+        from backend.models import OptimizationMode
+        from backend.token_optimizer import TokenOptimizationEngine
+
+        engine = TokenOptimizationEngine()
+        res = engine.optimize("check auth", self.items, max_token_budget=100, mode=OptimizationMode.NONE)
+
+        self.assertEqual(res.mode, "none")
+        self.assertLessEqual(res.estimated_input_tokens, 100)
+        self.assertGreater(len(res.items_retained), 0)
+
+    def test_mode_deterministic_compaction(self):
+        """Verify OptimizationMode.DETERMINISTIC applies multi-tier compaction and density ranking."""
+        from backend.models import OptimizationMode
+        from backend.token_optimizer import TokenOptimizationEngine
+
+        engine = TokenOptimizationEngine()
+        res = engine.optimize("check auth", self.items, max_token_budget=100, mode=OptimizationMode.DETERMINISTIC)
+
+        self.assertEqual(res.mode, "deterministic")
+        self.assertLessEqual(res.estimated_input_tokens, 100)
+        self.assertGreater(res.tokens_saved, 0)
+
+    def test_mode_llm_structured_compression(self):
+        """Verify OptimizationMode.LLM executes structured compression and guardrails."""
+        from backend.models import OptimizationMode
+        from backend.token_optimizer import TokenOptimizationEngine
+
+        engine = TokenOptimizationEngine()
+        res = engine.optimize("check auth", self.items, max_token_budget=300, mode=OptimizationMode.LLM)
+
+        self.assertEqual(res.mode, "llm")
+        self.assertLessEqual(res.estimated_input_tokens, 300)
+        self.assertIn("services/auth.py", res.optimized_context)
+        self.assertIn("AuthService", res.optimized_context)
+        self.assertTrue(res.provenance_audit.get("all_sources_preserved"))
+
+
+class TestCompareOptimizationModes(unittest.TestCase):
+    """Test suite comparing all three modes: none, deterministic, and llm."""
+
+    def test_compare_modes_returns_three_modes(self):
+        """Verify compare_optimization_modes returns valid results and comparison table."""
+        from backend.models import HybridRetrievalResult
+        from backend.token_optimizer import compare_optimization_modes
+
+        items = [
+            HybridRetrievalResult(
+                entity=f"Symbol_{i}",
+                type="class",
+                source="code",
+                file_or_document=f"src/file_{i}.py",
+                score=0.9 - (i * 0.1),
+                content_snippet=f"Detailed implementation and methods for symbol {i} " * 6,
+            )
+            for i in range(5)
+        ]
+
+        comparison = compare_optimization_modes(
+            user_query="inspect symbols",
+            ranked_context_items=items,
+            max_token_budget=150,
+        )
+
+        self.assertEqual(comparison.query, "inspect symbols")
+        self.assertEqual(comparison.max_token_budget, 150)
+        self.assertEqual(comparison.none_result.mode, "none")
+        self.assertEqual(comparison.deterministic_result.mode, "deterministic")
+        self.assertEqual(comparison.llm_result.mode, "llm")
+
+        # Verify comparison table has 3 rows
+        self.assertEqual(len(comparison.comparison_table), 3)
+        modes = [row["mode"] for row in comparison.comparison_table]
+        self.assertIn("none", modes)
+        self.assertIn("deterministic", modes)
+        self.assertIn("llm", modes)
+
+        # All modes must enforce the budget ceiling
+        for row in comparison.comparison_table:
+            self.assertLessEqual(row["estimated_input_tokens"], 150)
+
+    def test_comparison_serialization_roundtrip(self):
+        """Verify OptimizationComparison serializes to dictionary and reconstructs losslessly."""
+        from backend.models import HybridRetrievalResult, OptimizationComparison
+        from backend.token_optimizer import compare_optimization_modes
+
+        items = [
+            HybridRetrievalResult(
+                entity="AuthService",
+                type="class",
+                source="code",
+                file_or_document="services/auth.py",
+                score=0.9,
+                content_snippet="Authentication service implementation.",
+            )
+        ]
+
+        comp = compare_optimization_modes("auth query", items, max_token_budget=300)
+        d = comp.to_dict()
+
+        self.assertIn("none_result", d)
+        self.assertIn("deterministic_result", d)
+        self.assertIn("llm_result", d)
+        self.assertIn("comparison_table", d)
+
+        rebuilt = OptimizationComparison.from_dict(d)
+        self.assertEqual(rebuilt.query, comp.query)
+        self.assertEqual(rebuilt.max_token_budget, comp.max_token_budget)
+        self.assertEqual(len(rebuilt.comparison_table), 3)
+
 
 if __name__ == "__main__":
     unittest.main()
