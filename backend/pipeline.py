@@ -39,6 +39,13 @@ async def ingest_repository(
         edge_count = memory_store.upsert_relationships(
             [*code_edges, *document_edges, *cross_links]
         )
+        structural_summary = memory_store.sync_structural_hierarchy(
+            repository_id=scoped_repository_id,
+            user_id=user_id,
+            repository_name=root.name,
+            symbols=symbols,
+            entities=entities,
+        )
     finally:
         if owns_store:
             memory_store.close()
@@ -47,7 +54,10 @@ async def ingest_repository(
         "repository_id": scoped_repository_id,
         "code_symbols": code_count,
         "document_entities": document_count,
-        "relationships": edge_count,
+        "relationships": edge_count + structural_summary.get("structural_edges", 0),
+        "repositories": structural_summary.get("repositories", 0),
+        "modules": structural_summary.get("modules", 0),
+        "documents": structural_summary.get("documents", 0),
     }
 if __name__ == "__main__":
     import argparse

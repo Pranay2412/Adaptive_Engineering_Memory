@@ -100,7 +100,11 @@ class BackendNormalizationTests(unittest.TestCase):
         links = build_cross_links([entity], [symbol])
         self.assertEqual(len(links), 1)
         self.assertEqual((links[0].source_id, links[0].target_id, links[0].relation), ("doc", "code", "SPECIFIES"))
-        self.assertEqual(links[0].metadata, {"confidence": 1.0, "source": "cross_link_bridge"})
+        self.assertGreaterEqual(links[0].metadata["confidence"], 0.85)
+        self.assertEqual(links[0].metadata["source"], "cross_link_bridge")
+        self.assertIn("matching_method", links[0].metadata)
+        self.assertIn("lexical_score", links[0].metadata)
+        self.assertIn("explanation", links[0].metadata)
 
     def test_neo4j_upsert_uses_transaction_and_closes_session(self):
         driver = FakeDriver()
