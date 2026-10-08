@@ -26,6 +26,11 @@ Adaptive Engineering Memory constructs a unified cognitive repository knowledge 
    - Scores candidates across 8 explicit signals: `semantic_relevance`, `lexical_relevance`, `graph_relevance`, `freshness`, `confidence`, `repository_match`, `source_reliability`, and `token_cost`.
    - Supports configurable weights, intent-adaptive modulation, and full individual score exposure for debugging and research evaluation.
 
+6. **Synapse Token Optimization Engine (`backend/token_optimizer.py`)**:
+   - Deterministically optimizes context candidates under strict token budgets without calling an LLM.
+   - Ranks candidates by utility-per-token density ($U / C$), detects and prunes redundancies (lexical Jaccard overlap $\ge 0.70$ and structural subsumption), and applies multi-tier compaction (`FULL`, `COMPACT`, `MINIMAL`).
+   - Preserves critical relational traversal paths and outputs complete audit metrics (`tokens_saved`, `percentage_reduction`, itemized removed and retained lists).
+
 ---
 
 ## Requirements
@@ -164,7 +169,8 @@ All unit tests run completely offline with zero external network or database dep
 python -m unittest discover -s tests -v
 ```
 
-Test suite breakdown (**129 tests passed**):
+Test suite breakdown (**140 tests passed**):
+- `test_token_optimizer.py`: Deterministic token estimation, utility-per-token density ranking, redundancy pruning, graph relationship preservation, budget stopping, and orchestrator integration.
 - `test_orchestrator.py`: Intent classification across all 8 intents, strategy selection, token budgeting, and ACO orchestration.
 - `test_ranking.py`: All 8 ranking signals, weight normalization, deterministic reordering, score exposure, and tie-breaking.
 - `test_hybrid_retrieval.py`: Lexical, dense vector, and multi-hop graph traversal fusion.
@@ -177,6 +183,7 @@ Test suite breakdown (**129 tests passed**):
 ## Detailed Documentation
 
 - [System Architecture](docs/architecture.md)
+- [Synapse Token Optimization Engine](docs/token_optimization.md)
 - [Hybrid Retrieval & Configurable Ranking](docs/retrieval_and_ranking.md)
 - [Adaptive Context Orchestrator (ACO) Guide](docs/orchestrator_guide.md)
 - [Neo4j Unified Schema Reference](docs/schema_reference.md)

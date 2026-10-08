@@ -922,4 +922,122 @@ class CandidateRankingScore:
         )
 
 
+@dataclass
+class OptimizedItemRecord:
+    """Record of a context item retained after token optimization."""
+
+    entity: str
+    type: str
+    file_or_document: str
+    tier: str  # "full", "compact", "minimal"
+    tokens: int
+    utility: float
+    utility_per_token: float
+    relevance_information: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize retained item record to dictionary."""
+        return {
+            "entity": self.entity,
+            "type": self.type,
+            "file_or_document": self.file_or_document,
+            "tier": self.tier,
+            "tokens": self.tokens,
+            "utility": round(self.utility, 4),
+            "utility_per_token": round(self.utility_per_token, 4),
+            "relevance_information": self.relevance_information,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> OptimizedItemRecord:
+        """Reconstruct record from dictionary representation."""
+        return cls(
+            entity=str(data.get("entity", "")),
+            type=str(data.get("type", "")),
+            file_or_document=str(data.get("file_or_document", "")),
+            tier=str(data.get("tier", "full")),
+            tokens=int(data.get("tokens", 0)),
+            utility=float(data.get("utility", 0.0)),
+            utility_per_token=float(data.get("utility_per_token", 0.0)),
+            relevance_information=str(data.get("relevance_information", "")),
+        )
+
+
+@dataclass
+class RemovedItemRecord:
+    """Record of a candidate item removed during token optimization."""
+
+    entity: str
+    type: str
+    file_or_document: str
+    reason: str  # "budget_exceeded", "redundant_content", "subsumed"
+    original_tokens: int
+    utility: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize removed item record to dictionary."""
+        return {
+            "entity": self.entity,
+            "type": self.type,
+            "file_or_document": self.file_or_document,
+            "reason": self.reason,
+            "original_tokens": self.original_tokens,
+            "utility": round(self.utility, 4),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RemovedItemRecord:
+        """Reconstruct removed item record from dictionary representation."""
+        return cls(
+            entity=str(data.get("entity", "")),
+            type=str(data.get("type", "")),
+            file_or_document=str(data.get("file_or_document", "")),
+            reason=str(data.get("reason", "unknown")),
+            original_tokens=int(data.get("original_tokens", 0)),
+            utility=float(data.get("utility", 0.0)),
+        )
+
+
+@dataclass
+class TokenOptimizationResult:
+    """Output from the Token Optimization Engine for Synapse."""
+
+    optimized_context: str
+    estimated_input_tokens: int
+    original_estimated_tokens: int
+    tokens_saved: int
+    percentage_reduction: float
+    items_removed: list[dict[str, Any]] = field(default_factory=list)
+    items_retained: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize token optimization result to dictionary."""
+        return {
+            "optimized_context": self.optimized_context,
+            "estimated_input_tokens": self.estimated_input_tokens,
+            "original_estimated_tokens": self.original_estimated_tokens,
+            "tokens_saved": self.tokens_saved,
+            "percentage_reduction": round(self.percentage_reduction, 2),
+            "items_removed": list(self.items_removed),
+            "items_retained": list(self.items_retained),
+            "metadata": dict(self.metadata),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TokenOptimizationResult:
+        """Reconstruct token optimization result from dictionary representation."""
+        return cls(
+            optimized_context=str(data.get("optimized_context", "")),
+            estimated_input_tokens=int(data.get("estimated_input_tokens", 0)),
+            original_estimated_tokens=int(data.get("original_estimated_tokens", 0)),
+            tokens_saved=int(data.get("tokens_saved", 0)),
+            percentage_reduction=float(data.get("percentage_reduction", 0.0)),
+            items_removed=list(data.get("items_removed", [])),
+            items_retained=list(data.get("items_retained", [])),
+            metadata=dict(data.get("metadata", {})),
+        )
+
+
+
 

@@ -50,6 +50,7 @@ from .ranking import (
     compute_source_reliability,
     compute_token_cost_efficiency,
 )
+from .token_optimizer import TokenOptimizationEngine
 
 logger = logging.getLogger(__name__)
 
@@ -624,6 +625,34 @@ class AdaptiveContextPacker(BaseContextPacker):
         return final_context, final_tokens
 
 
+class TokenOptimizedContextPacker(BaseContextPacker):
+    """Context packer leveraging Synapse Token Optimization Engine for multi-tier knapsack packing."""
+
+    def __init__(self, optimizer: TokenOptimizationEngine | None = None) -> None:
+        self.optimizer = optimizer or TokenOptimizationEngine()
+
+    def pack(
+        self,
+        results: list[HybridRetrievalResult],
+        intent_result: IntentAnalysisResult,
+        token_budget: int | None = None,
+    ) -> tuple[str, int]:
+        """Pack context using the deterministic TokenOptimizationEngine."""
+        budget = token_budget if token_budget is not None else 4000
+        query_text = (
+            ", ".join(intent_result.extracted_entities)
+            if intent_result.extracted_entities
+            else intent_result.primary_intent.value
+        )
+        opt_res = self.optimizer.optimize(
+            user_query=query_text,
+            ranked_context_items=results,
+            max_token_budget=budget,
+            intent_result=intent_result,
+        )
+        return opt_res.optimized_context, opt_res.estimated_input_tokens
+
+
 # ---------------------------------------------------------------------------
 # 5. Adaptive Context Orchestrator Service
 # ---------------------------------------------------------------------------
@@ -640,11 +669,13 @@ class AdaptiveContextOrchestrator:
         classifier: BaseIntentClassifier | None = None,
         ranker: BaseContextRanker | None = None,
         packer: BaseContextPacker | None = None,
+        token_optimizer: TokenOptimizationEngine | None = None,
     ) -> None:
         self.retrieval_service = retrieval_service or HybridRetrievalService()
         self.classifier = classifier or RuleBasedIntentClassifier()
         self.ranker = ranker or ConfigurableContextRanker()
         self.packer = packer or AdaptiveContextPacker()
+        self.token_optimizer = token_optimizer or TokenOptimizationEngine()
 
     def orchestrate(
         self,
@@ -711,6 +742,16 @@ class AdaptiveContextOrchestrator:
         total_deduped = len(deduped_results)
 
         # Step 6: Construct optimized context
+        token_opt_dict: dict[str, Any] | None = None
+        if max_tokens is not None and self.token_optimizer is not None:
+            opt_res = self.token_optimizer.optimize(
+                user_query=query,
+                ranked_context_items=deduped_results,
+                max_token_budget=max_tokens,
+                intent_result=intent_result,
+            )
+            token_opt_dict = opt_res.to_dict()
+
         context_text, estimated_tokens = self.packer.pack(
             results=deduped_results,
             intent_result=intent_result,
@@ -741,6 +782,7 @@ class AdaptiveContextOrchestrator:
             "token_budget": max_tokens,
             "estimated_tokens": estimated_tokens,
             "channel_stats": query_response.retrieval_stats,
+            "token_optimization": token_opt_dict,
         }
 
         return OrchestratedContext(
@@ -773,6 +815,7 @@ def orchestrate_context(
     classifier: BaseIntentClassifier | None = None,
     ranker: BaseContextRanker | None = None,
     packer: BaseContextPacker | None = None,
+    token_optimizer: TokenOptimizationEngine | None = None,
 ) -> OrchestratedContext:
     """Convenience function to run the Adaptive Context Orchestrator."""
     orchestrator = AdaptiveContextOrchestrator(
@@ -780,6 +823,7 @@ def orchestrate_context(
         classifier=classifier,
         ranker=ranker,
         packer=packer,
+        token_optimizer=token_optimizer,
     )
     return orchestrator.orchestrate(
         query=query,
