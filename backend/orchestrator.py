@@ -31,6 +31,7 @@ from .models import (
     GraphEdge,
     HybridRetrievalResult,
     IntentAnalysisResult,
+    Memory,
     OptimizationMode,
     OrchestratedContext,
     QueryIntent,
@@ -560,12 +561,15 @@ class AdaptiveContextPacker(BaseContextPacker):
         # Categorize results into sections
         specs_and_docs: list[HybridRetrievalResult] = []
         code_symbols: list[HybridRetrievalResult] = []
+        session_and_team_memories: list[HybridRetrievalResult] = []
         graph_relationships: list[HybridRetrievalResult] = []
         other_results: list[HybridRetrievalResult] = []
 
         for r in results:
             if r.relationship_path:
                 graph_relationships.append(r)
+            elif r.source in ("session_memory", "team_memory") or r.type.startswith("Memory"):
+                session_and_team_memories.append(r)
             elif r.source == "documentation" or "Document" in r.type:
                 specs_and_docs.append(r)
             elif r.source == "code" or "CodeSymbol" in r.type:
@@ -574,6 +578,7 @@ class AdaptiveContextPacker(BaseContextPacker):
                 other_results.append(r)
 
         sections: list[tuple[str, list[HybridRetrievalResult]]] = [
+            ("Engineering Decisions & AI Session Memory", session_and_team_memories),
             ("Architecture & Specifications", specs_and_docs),
             ("Code Symbols & Interfaces", code_symbols),
             ("System Relationships & Traversal Paths", graph_relationships),
@@ -680,12 +685,14 @@ class AdaptiveContextOrchestrator:
         ranker: BaseContextRanker | None = None,
         packer: BaseContextPacker | None = None,
         token_optimizer: TokenOptimizationEngine | None = None,
+        session_memory_service: Any | None = None,
     ) -> None:
         self.retrieval_service = retrieval_service or HybridRetrievalService()
         self.classifier = classifier or RuleBasedIntentClassifier()
         self.ranker = ranker or ConfigurableContextRanker()
         self.packer = packer or AdaptiveContextPacker()
         self.token_optimizer = token_optimizer or TokenOptimizationEngine()
+        self.session_memory_service = session_memory_service
 
     def orchestrate(
         self,
@@ -697,6 +704,8 @@ class AdaptiveContextOrchestrator:
         symbols: list[CodeSymbol] | None = None,
         entities: list[DocumentEntity] | None = None,
         edges: list[GraphEdge] | None = None,
+        memories: list[Memory] | None = None,
+        session_memory_service: Any | None = None,
         optimization_mode: OptimizationMode | str = OptimizationMode.DETERMINISTIC,
         llm_compressor: BaseLLMCompressor | None = None,
     ) -> OrchestratedContext:
@@ -704,7 +713,7 @@ class AdaptiveContextOrchestrator:
 
         1. Analyze query intent
         2. Select knowledge sources & strategy
-        3. Execute hybrid retrieval
+        3. Execute hybrid retrieval (including AI session memories)
         4. Rank retrieved information
         5. Remove duplicates
         6. Construct optimized context
@@ -732,19 +741,39 @@ class AdaptiveContextOrchestrator:
             edges=edges,
         )
 
-        total_retrieved = len(query_response.results)
+        session_mem_results: list[HybridRetrievalResult] = []
+        if memories is not None:
+            query_terms = [t.lower() for t in query.split() if len(t) > 2]
+            for m in memories:
+                m_text = f"{m.title} {m.content}".lower()
+                matches = sum(1 for t in query_terms if t in m_text)
+                term_score = matches / max(1, len(query_terms))
+                score = round(0.55 + 0.45 * term_score * m.confidence, 4)
+                session_mem_results.append(m.to_hybrid_result(score=score))
+        else:
+            svc = session_memory_service or self.session_memory_service
+            if svc is not None and hasattr(svc, "retrieve_for_aco"):
+                session_mem_results = svc.retrieve_for_aco(
+                    query=query,
+                    user_id=user_id,
+                    repository_id=repository_id,
+                    limit=strategy.get("limit", 10),
+                )
+
+        combined_candidates = [*query_response.results, *session_mem_results]
+        total_retrieved = len(combined_candidates)
 
         # Step 4: Rank retrieved information with configurable ranking
         try:
             ranked_results = self.ranker.rank(
-                results=query_response.results,
+                results=combined_candidates,
                 intent_result=intent_result,
                 query=query,
                 repository_id=repository_id,
             )
         except TypeError:
             ranked_results = self.ranker.rank(
-                results=query_response.results,
+                results=combined_candidates,
                 intent_result=intent_result,
                 query=query,
             )
@@ -830,6 +859,8 @@ def orchestrate_context(
     ranker: BaseContextRanker | None = None,
     packer: BaseContextPacker | None = None,
     token_optimizer: TokenOptimizationEngine | None = None,
+    memories: list[Memory] | None = None,
+    session_memory_service: Any | None = None,
     optimization_mode: OptimizationMode | str = OptimizationMode.DETERMINISTIC,
     llm_compressor: BaseLLMCompressor | None = None,
 ) -> OrchestratedContext:
@@ -840,6 +871,7 @@ def orchestrate_context(
         ranker=ranker,
         packer=packer,
         token_optimizer=token_optimizer,
+        session_memory_service=session_memory_service,
     )
     return orchestrator.orchestrate(
         query=query,
@@ -849,6 +881,8 @@ def orchestrate_context(
         symbols=symbols,
         entities=entities,
         edges=edges,
+        memories=memories,
+        session_memory_service=session_memory_service,
         optimization_mode=optimization_mode,
         llm_compressor=llm_compressor,
     )

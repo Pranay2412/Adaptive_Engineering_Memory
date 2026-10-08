@@ -10,16 +10,57 @@ from typing import Any
 from dotenv import load_dotenv
 
 from .models import (
+    AISession,
+    AISessionRecord,
     CodeSymbol,
     Document,
     DocumentEntity,
+    EngineeringDecision,
+    EngineeringEvent,
     GraphEdge,
+    Memory,
+    MemoryProvenance,
     Module,
+    Project,
     Repository,
+    Team,
+    TeamMembership,
+    User,
     scoped_id,
 )
 
-RELATION_TYPES = {"CALLS", "IMPORTS", "INHERITS", "DEFINES", "MOTIVATES", "DEPENDS_ON", "SPECIFIES"}
+RELATION_TYPES = {
+    # Core code & doc relationships
+    "CALLS",
+    "IMPORTS",
+    "INHERITS",
+    "DEFINES",
+    "MOTIVATES",
+    "DEPENDS_ON",
+    "SPECIFIES",
+    # Team memory relationships
+    "MEMBER_OF",
+    "OWNS_PROJECT",
+    "CONTAINS_REPO",
+    "INITIATED_SESSION",
+    "IN_REPOSITORY",
+    "AUTHORED",
+    "SHARED_WITH_TEAM",
+    "SCOPED_TO_REPO",
+    "PART_OF_PROJECT",
+    "EXTRACTED_FROM_SESSION",
+    "ORIGINATED_FROM_EVENT",
+    "JUSTIFIED_BY",
+    "REFERENCES_SYMBOL",
+    "REFERENCES_DOC",
+    "SUPERSEDES",
+    "AUTHORED_BY",
+    "AFFECTS_REPO",
+    "APPLIES_TO_TEAM",
+    "RELATES_TO_EVENT",
+    "TOUCHES_SYMBOL",
+    "TOUCHES_FILE",
+}
 
 
 class Neo4jMemoryStore:
@@ -68,6 +109,36 @@ class Neo4jMemoryStore:
             "CREATE INDEX document_id IF NOT EXISTS FOR (doc:Document) ON (doc.id)",
             "CREATE INDEX document_path IF NOT EXISTS FOR (doc:Document) ON (doc.path)",
             "CREATE INDEX document_repo IF NOT EXISTS FOR (doc:Document) ON (doc.repository_id)",
+            # User indexes
+            "CREATE INDEX user_id IF NOT EXISTS FOR (u:User) ON (u.id)",
+            "CREATE INDEX user_email IF NOT EXISTS FOR (u:User) ON (u.email)",
+            # Team indexes
+            "CREATE INDEX team_id IF NOT EXISTS FOR (t:Team) ON (t.id)",
+            "CREATE INDEX team_name IF NOT EXISTS FOR (t:Team) ON (t.name)",
+            # Project indexes
+            "CREATE INDEX project_id IF NOT EXISTS FOR (p:Project) ON (p.id)",
+            "CREATE INDEX project_team IF NOT EXISTS FOR (p:Project) ON (p.team_id)",
+            # AISession indexes
+            "CREATE INDEX ai_session_id IF NOT EXISTS FOR (s:AISession) ON (s.id)",
+            "CREATE INDEX ai_session_user IF NOT EXISTS FOR (s:AISession) ON (s.user_id)",
+            "CREATE INDEX ai_session_repo IF NOT EXISTS FOR (s:AISession) ON (s.repository_id)",
+            # EngineeringEvent indexes
+            "CREATE INDEX eng_event_id IF NOT EXISTS FOR (e:EngineeringEvent) ON (e.id)",
+            "CREATE INDEX eng_event_repo IF NOT EXISTS FOR (e:EngineeringEvent) ON (e.repository_id)",
+            "CREATE INDEX eng_event_type IF NOT EXISTS FOR (e:EngineeringEvent) ON (e.event_type)",
+            # EngineeringDecision indexes
+            "CREATE INDEX eng_decision_id IF NOT EXISTS FOR (d:EngineeringDecision) ON (d.id)",
+            "CREATE INDEX eng_decision_repo IF NOT EXISTS FOR (d:EngineeringDecision) ON (d.repository_id)",
+            "CREATE INDEX eng_decision_team IF NOT EXISTS FOR (d:EngineeringDecision) ON (d.team_id)",
+            "CREATE INDEX eng_decision_category IF NOT EXISTS FOR (d:EngineeringDecision) ON (d.category)",
+            # Memory indexes
+            "CREATE INDEX memory_id IF NOT EXISTS FOR (m:Memory) ON (m.id)",
+            "CREATE INDEX memory_scope IF NOT EXISTS FOR (m:Memory) ON (m.scope)",
+            "CREATE INDEX memory_category IF NOT EXISTS FOR (m:Memory) ON (m.category)",
+            "CREATE INDEX memory_repo IF NOT EXISTS FOR (m:Memory) ON (m.repository_id)",
+            "CREATE INDEX memory_team IF NOT EXISTS FOR (m:Memory) ON (m.team_id)",
+            "CREATE INDEX memory_author IF NOT EXISTS FOR (m:Memory) ON (m.author_id)",
+            "CREATE INDEX memory_status IF NOT EXISTS FOR (m:Memory) ON (m.status)",
         )
         with self.driver.session() as session:
             for statement in statements:
@@ -227,6 +298,433 @@ class Neo4jMemoryStore:
             "doc.metadata_json = row.metadata_json",
             rows,
         )
+        return len(rows)
+
+    def upsert_users(self, users: Iterable[User]) -> int:
+        rows = [
+            {
+                "id": u.id,
+                "name": u.name,
+                "email": u.email,
+                "role": u.role,
+                "created_at": u.created_at,
+                "metadata_json": json.dumps(u.metadata, sort_keys=True) if u.metadata else None,
+            }
+            for u in users
+        ]
+        self._write_rows(
+            "UNWIND $rows AS row MERGE (u:User {id: row.id}) "
+            "SET u.name = row.name, u.email = row.email, u.role = row.role, "
+            "u.created_at = row.created_at, u.metadata_json = row.metadata_json",
+            rows,
+        )
+        return len(rows)
+
+    def upsert_teams(self, teams: Iterable[Team]) -> int:
+        rows = [
+            {
+                "id": t.id,
+                "name": t.name,
+                "description": t.description,
+                "created_at": t.created_at,
+                "metadata_json": json.dumps(t.metadata, sort_keys=True) if t.metadata else None,
+            }
+            for t in teams
+        ]
+        self._write_rows(
+            "UNWIND $rows AS row MERGE (t:Team {id: row.id}) "
+            "SET t.name = row.name, t.description = row.description, "
+            "t.created_at = row.created_at, t.metadata_json = row.metadata_json",
+            rows,
+        )
+        return len(rows)
+
+    def upsert_team_memberships(self, memberships: Iterable[TeamMembership]) -> int:
+        rows = [
+            {
+                "user_id": m.user_id,
+                "team_id": m.team_id,
+                "role": m.role,
+                "joined_at": m.joined_at,
+            }
+            for m in memberships
+        ]
+        self._write_rows(
+            "UNWIND $rows AS row MATCH (u:User {id: row.user_id}) "
+            "MATCH (t:Team {id: row.team_id}) "
+            "MERGE (u)-[r:MEMBER_OF]->(t) "
+            "SET r.role = row.role, r.joined_at = row.joined_at",
+            rows,
+        )
+        return len(rows)
+
+    def upsert_projects(self, projects: Iterable[Project]) -> int:
+        rows = [
+            {
+                "id": p.id,
+                "name": p.name,
+                "description": p.description,
+                "team_id": p.team_id,
+                "created_at": p.created_at,
+                "metadata_json": json.dumps(p.metadata, sort_keys=True) if p.metadata else None,
+            }
+            for p in projects
+        ]
+        self._write_rows(
+            "UNWIND $rows AS row MERGE (p:Project {id: row.id}) "
+            "SET p.name = row.name, p.description = row.description, "
+            "p.team_id = row.team_id, p.created_at = row.created_at, "
+            "p.metadata_json = row.metadata_json",
+            rows,
+        )
+        team_rows = [r for r in rows if r.get("team_id")]
+        if team_rows:
+            self._write_rows(
+                "UNWIND $rows AS row MATCH (t:Team {id: row.team_id}) "
+                "MATCH (p:Project {id: row.id}) "
+                "MERGE (t)-[:OWNS_PROJECT]->(p)",
+                team_rows,
+            )
+        return len(rows)
+
+    def upsert_ai_sessions(self, sessions: Iterable[AISession | AISessionRecord]) -> int:
+        rows: list[dict[str, Any]] = []
+        user_links: list[dict[str, Any]] = []
+        repo_links: list[dict[str, Any]] = []
+        team_links: list[dict[str, Any]] = []
+        symbol_links: list[dict[str, Any]] = []
+        file_links: list[dict[str, Any]] = []
+
+        for s in sessions:
+            sess_id = getattr(s, "session_id", getattr(s, "id", ""))
+            user_id = getattr(s, "user_id", "")
+            repo_id = getattr(s, "repository_id", None)
+            team_id = getattr(s, "team_id", None)
+            prompt = getattr(s, "prompt", "")
+            resp_summary = getattr(s, "response_summary", getattr(s, "summary", ""))
+            title = getattr(s, "title", prompt[:80] if prompt else sess_id)
+            started_at = getattr(s, "timestamp", getattr(s, "started_at", ""))
+            visibility = getattr(s, "visibility", "repository")
+            meta = getattr(s, "metadata", {}) or {}
+
+            rows.append(
+                {
+                    "id": sess_id,
+                    "title": title,
+                    "user_id": user_id,
+                    "repository_id": repo_id,
+                    "team_id": team_id,
+                    "prompt": prompt,
+                    "response_summary": resp_summary,
+                    "visibility": visibility,
+                    "started_at": started_at,
+                    "summary": resp_summary,
+                    "query_count": getattr(s, "query_count", 1),
+                    "metadata_json": json.dumps(meta, sort_keys=True) if meta else None,
+                }
+            )
+            if user_id:
+                user_links.append({"user_id": user_id, "session_id": sess_id})
+            if repo_id:
+                repo_links.append({"repository_id": repo_id, "session_id": sess_id})
+            if team_id:
+                team_links.append({"team_id": team_id, "session_id": sess_id})
+
+            affected_symbols = getattr(s, "affected_symbols", [])
+            for sym in (affected_symbols or []):
+                symbol_links.append({"session_id": sess_id, "symbol": sym})
+
+            affected_files = getattr(s, "affected_files", [])
+            for f in (affected_files or []):
+                file_links.append({"session_id": sess_id, "file": f})
+
+        self._write_rows(
+            "UNWIND $rows AS row MERGE (s:AISession {id: row.id}) "
+            "SET s.title = row.title, s.user_id = row.user_id, "
+            "s.repository_id = row.repository_id, s.team_id = row.team_id, "
+            "s.prompt = row.prompt, s.response_summary = row.response_summary, "
+            "s.visibility = row.visibility, "
+            "s.started_at = row.started_at, s.summary = row.summary, "
+            "s.query_count = row.query_count, "
+            "s.metadata_json = row.metadata_json",
+            rows,
+        )
+
+        if user_links:
+            self._write_rows(
+                "UNWIND $rows AS row MATCH (u:User {id: row.user_id}) "
+                "MATCH (s:AISession {id: row.session_id}) "
+                "MERGE (u)-[:INITIATED_SESSION]->(s)",
+                user_links,
+            )
+        if repo_links:
+            self._write_rows(
+                "UNWIND $rows AS row MATCH (s:AISession {id: row.session_id}) "
+                "MATCH (r:Repository {id: row.repository_id}) "
+                "MERGE (s)-[:IN_REPOSITORY]->(r)",
+                repo_links,
+            )
+        if team_links:
+            self._write_rows(
+                "UNWIND $rows AS row MATCH (s:AISession {id: row.session_id}) "
+                "MATCH (t:Team {id: row.team_id}) "
+                "MERGE (s)-[:SHARED_WITH_TEAM]->(t)",
+                team_links,
+            )
+        if symbol_links:
+            self._write_rows(
+                "UNWIND $rows AS row MATCH (s:AISession {id: row.session_id}) "
+                "MATCH (c:CodeSymbol) "
+                "WHERE c.id = row.symbol OR c.name = row.symbol OR c.qualified_name = row.symbol "
+                "MERGE (s)-[:TOUCHES_SYMBOL]->(c)",
+                symbol_links,
+            )
+        if file_links:
+            self._write_rows(
+                "UNWIND $rows AS row MATCH (s:AISession {id: row.session_id}) "
+                "MATCH (doc:Document) "
+                "WHERE doc.id = row.file OR doc.path = row.file OR doc.name = row.file "
+                "MERGE (s)-[:TOUCHES_FILE]->(doc)",
+                file_links,
+            )
+
+        return len(rows)
+
+    def upsert_engineering_events(self, events: Iterable[EngineeringEvent]) -> int:
+        rows = [
+            {
+                "id": e.id,
+                "event_type": e.event_type,
+                "title": e.title,
+                "description": e.description,
+                "timestamp": e.timestamp,
+                "repository_id": e.repository_id,
+                "team_id": e.team_id,
+                "user_id": e.user_id,
+                "external_ref": e.external_ref,
+                "metadata_json": json.dumps(e.metadata, sort_keys=True) if e.metadata else None,
+            }
+            for e in events
+        ]
+        self._write_rows(
+            "UNWIND $rows AS row MERGE (e:EngineeringEvent {id: row.id}) "
+            "SET e.event_type = row.event_type, e.title = row.title, "
+            "e.description = row.description, e.timestamp = row.timestamp, "
+            "e.repository_id = row.repository_id, e.team_id = row.team_id, "
+            "e.user_id = row.user_id, e.external_ref = row.external_ref, "
+            "e.metadata_json = row.metadata_json",
+            rows,
+        )
+        return len(rows)
+
+    def upsert_engineering_decisions(self, decisions: Iterable[EngineeringDecision]) -> int:
+        rows = [
+            {
+                "id": d.id,
+                "title": d.title,
+                "rationale": d.rationale,
+                "status": d.status,
+                "category": d.category,
+                "scope": d.scope,
+                "author_id": d.author_id,
+                "team_id": d.team_id,
+                "repository_id": d.repository_id,
+                "project_id": d.project_id,
+                "alternatives_json": json.dumps(d.alternatives_considered),
+                "trade_offs_json": json.dumps(d.trade_offs),
+                "superseded_by": d.superseded_by,
+                "created_at": d.created_at,
+                "updated_at": d.updated_at,
+                "metadata_json": json.dumps(d.metadata, sort_keys=True) if d.metadata else None,
+            }
+            for d in decisions
+        ]
+        self._write_rows(
+            "UNWIND $rows AS row MERGE (d:EngineeringDecision {id: row.id}) "
+            "SET d.title = row.title, d.rationale = row.rationale, "
+            "d.status = row.status, d.category = row.category, d.scope = row.scope, "
+            "d.author_id = row.author_id, d.team_id = row.team_id, "
+            "d.repository_id = row.repository_id, d.project_id = row.project_id, "
+            "d.alternatives_json = row.alternatives_json, d.trade_offs_json = row.trade_offs_json, "
+            "d.superseded_by = row.superseded_by, d.created_at = row.created_at, "
+            "d.updated_at = row.updated_at, d.metadata_json = row.metadata_json",
+            rows,
+        )
+        author_rows = [r for r in rows if r.get("author_id")]
+        if author_rows:
+            self._write_rows(
+                "UNWIND $rows AS row MATCH (d:EngineeringDecision {id: row.id}) "
+                "MATCH (u:User {id: row.author_id}) "
+                "MERGE (d)-[:AUTHORED_BY]->(u)",
+                author_rows,
+            )
+        repo_rows = [r for r in rows if r.get("repository_id")]
+        if repo_rows:
+            self._write_rows(
+                "UNWIND $rows AS row MATCH (d:EngineeringDecision {id: row.id}) "
+                "MATCH (r:Repository {id: row.repository_id}) "
+                "MERGE (d)-[:AFFECTS_REPO]->(r)",
+                repo_rows,
+            )
+        team_rows = [r for r in rows if r.get("team_id")]
+        if team_rows:
+            self._write_rows(
+                "UNWIND $rows AS row MATCH (d:EngineeringDecision {id: row.id}) "
+                "MATCH (t:Team {id: row.team_id}) "
+                "MERGE (d)-[:APPLIES_TO_TEAM]->(t)",
+                team_rows,
+            )
+        return len(rows)
+
+    def upsert_memories(self, memories: Iterable[Memory]) -> int:
+        rows: list[dict[str, Any]] = []
+        author_links: list[dict[str, Any]] = []
+        team_links: list[dict[str, Any]] = []
+        repo_links: list[dict[str, Any]] = []
+        project_links: list[dict[str, Any]] = []
+        session_links: list[dict[str, Any]] = []
+        event_links: list[dict[str, Any]] = []
+        decision_links: list[dict[str, Any]] = []
+        supersede_links: list[dict[str, Any]] = []
+        symbol_links: list[dict[str, Any]] = []
+        doc_links: list[dict[str, Any]] = []
+
+        for m in memories:
+            rows.append(
+                {
+                    "id": m.id,
+                    "title": m.title,
+                    "content": m.content,
+                    "category": m.category,
+                    "scope": m.scope,
+                    "author_id": m.author_id,
+                    "team_id": m.team_id,
+                    "repository_id": m.repository_id,
+                    "project_id": m.project_id,
+                    "session_id": m.session_id,
+                    "event_id": m.event_id,
+                    "decision_id": m.decision_id,
+                    "impact_areas_json": json.dumps(m.impact_areas),
+                    "actionable_takeaways_json": json.dumps(m.actionable_takeaways),
+                    "confidence": m.confidence,
+                    "status": m.status,
+                    "superseded_by": m.superseded_by,
+                    "created_at": m.created_at,
+                    "updated_at": m.updated_at,
+                    "metadata_json": json.dumps(m.metadata, sort_keys=True) if m.metadata else None,
+                    "provenance_json": json.dumps(m.provenance.to_dict(), sort_keys=True) if m.provenance else None,
+                }
+            )
+            if m.author_id:
+                author_links.append({"author_id": m.author_id, "memory_id": m.id})
+            if m.team_id:
+                team_links.append({"team_id": m.team_id, "memory_id": m.id})
+            if m.repository_id:
+                repo_links.append({"repository_id": m.repository_id, "memory_id": m.id})
+            if m.project_id:
+                project_links.append({"project_id": m.project_id, "memory_id": m.id})
+            if m.session_id:
+                session_links.append({"session_id": m.session_id, "memory_id": m.id})
+            if m.event_id:
+                event_links.append({"event_id": m.event_id, "memory_id": m.id})
+            if m.decision_id:
+                decision_links.append({"decision_id": m.decision_id, "memory_id": m.id})
+            if m.superseded_by:
+                supersede_links.append({"old_id": m.id, "new_id": m.superseded_by})
+            for sym in (m.provenance.symbol_names if m.provenance else []):
+                symbol_links.append({"memory_id": m.id, "symbol_ref": sym})
+            for doc in (m.provenance.document_paths if m.provenance else []):
+                doc_links.append({"memory_id": m.id, "doc_ref": doc})
+
+        self._write_rows(
+            "UNWIND $rows AS row MERGE (m:Memory {id: row.id}) "
+            "SET m.title = row.title, m.content = row.content, "
+            "m.category = row.category, m.scope = row.scope, "
+            "m.author_id = row.author_id, m.team_id = row.team_id, "
+            "m.repository_id = row.repository_id, m.project_id = row.project_id, "
+            "m.session_id = row.session_id, m.event_id = row.event_id, "
+            "m.decision_id = row.decision_id, "
+            "m.impact_areas_json = row.impact_areas_json, "
+            "m.actionable_takeaways_json = row.actionable_takeaways_json, "
+            "m.confidence = row.confidence, m.status = row.status, "
+            "m.superseded_by = row.superseded_by, m.created_at = row.created_at, "
+            "m.updated_at = row.updated_at, m.metadata_json = row.metadata_json, "
+            "m.provenance_json = row.provenance_json",
+            rows,
+        )
+
+        if author_links:
+            self._write_rows(
+                "UNWIND $rows AS row MATCH (u:User {id: row.author_id}) "
+                "MATCH (m:Memory {id: row.memory_id}) "
+                "MERGE (u)-[:AUTHORED]->(m)",
+                author_links,
+            )
+        if team_links:
+            self._write_rows(
+                "UNWIND $rows AS row MATCH (m:Memory {id: row.memory_id}) "
+                "MATCH (t:Team {id: row.team_id}) "
+                "MERGE (m)-[:SHARED_WITH_TEAM]->(t)",
+                team_links,
+            )
+        if repo_links:
+            self._write_rows(
+                "UNWIND $rows AS row MATCH (m:Memory {id: row.memory_id}) "
+                "MATCH (r:Repository {id: row.repository_id}) "
+                "MERGE (m)-[:SCOPED_TO_REPO]->(r)",
+                repo_links,
+            )
+        if project_links:
+            self._write_rows(
+                "UNWIND $rows AS row MATCH (m:Memory {id: row.memory_id}) "
+                "MATCH (p:Project {id: row.project_id}) "
+                "MERGE (m)-[:PART_OF_PROJECT]->(p)",
+                project_links,
+            )
+        if session_links:
+            self._write_rows(
+                "UNWIND $rows AS row MATCH (m:Memory {id: row.memory_id}) "
+                "MATCH (s:AISession {id: row.session_id}) "
+                "MERGE (m)-[:EXTRACTED_FROM_SESSION]->(s)",
+                session_links,
+            )
+        if event_links:
+            self._write_rows(
+                "UNWIND $rows AS row MATCH (m:Memory {id: row.memory_id}) "
+                "MATCH (e:EngineeringEvent {id: row.event_id}) "
+                "MERGE (m)-[:ORIGINATED_FROM_EVENT]->(e)",
+                event_links,
+            )
+        if decision_links:
+            self._write_rows(
+                "UNWIND $rows AS row MATCH (m:Memory {id: row.memory_id}) "
+                "MATCH (d:EngineeringDecision {id: row.decision_id}) "
+                "MERGE (m)-[:JUSTIFIED_BY]->(d)",
+                decision_links,
+            )
+        if supersede_links:
+            self._write_rows(
+                "UNWIND $rows AS row MATCH (m_old:Memory {id: row.old_id}) "
+                "MATCH (m_new:Memory {id: row.new_id}) "
+                "MERGE (m_old)-[:SUPERSEDES]->(m_new)",
+                supersede_links,
+            )
+        if symbol_links:
+            self._write_rows(
+                "UNWIND $rows AS row MATCH (m:Memory {id: row.memory_id}) "
+                "MATCH (c:CodeSymbol) "
+                "WHERE c.id = row.symbol_ref OR c.name = row.symbol_ref OR c.qualified_name = row.symbol_ref "
+                "MERGE (m)-[:REFERENCES_SYMBOL]->(c)",
+                symbol_links,
+            )
+        if doc_links:
+            self._write_rows(
+                "UNWIND $rows AS row MATCH (m:Memory {id: row.memory_id}) "
+                "MATCH (doc:Document) "
+                "WHERE doc.id = row.doc_ref OR doc.path = row.doc_ref OR doc.name = row.doc_ref "
+                "MERGE (m)-[:REFERENCES_DOC]->(doc)",
+                doc_links,
+            )
         return len(rows)
 
     def upsert_relationships(self, edges: Iterable[GraphEdge]) -> int:

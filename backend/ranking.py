@@ -41,7 +41,10 @@ DEFAULT_SOURCE_RELIABILITY_MAP: dict[str, float] = {
     "code": 1.0,               # Ground-truth AST parsed implementation
     "rfc": 0.95,               # Approved technical RFC or specification
     "architecture_spec": 0.95, # Verified system architecture documentation
+    "architecture_decision": 0.95, # Formal engineering architecture decision
     "spec": 0.95,              # Formal requirements / spec
+    "team_memory": 0.90,       # Verified team engineering knowledge card
+    "session_memory": 0.90,    # Distilled AI development session memory
     "documentation": 0.85,     # General developer documentation
     "docstring": 0.85,         # Code docstrings and inline docblocks
     "comment": 0.75,           # Code comments

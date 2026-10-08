@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
@@ -493,6 +494,16 @@ class ResultProvenance:
     matched_terms: list[str] = field(default_factory=list)
     graph_hops_count: int = 0
     traversal_path: str | None = None
+
+    @property
+    def channel(self) -> str:
+        """Convenience property for primary channel."""
+        return self.channels[0] if self.channels else (self.source_type or "")
+
+    @property
+    def file_paths(self) -> list[str]:
+        """Convenience property returning file_path as a list if present."""
+        return [self.file_path] if self.file_path else []
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize provenance to a dictionary."""
@@ -1088,6 +1099,559 @@ class OptimizationComparison:
             llm_result=TokenOptimizationResult.from_dict(data.get("llm_result", {})),
             comparison_table=list(data.get("comparison_table", [])),
             metadata=dict(data.get("metadata", {})),
+        )
+
+
+def utc_now_iso() -> str:
+    """Return current UTC timestamp in ISO 8601 format."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Team Memory Subsystem Domain Models
+# ---------------------------------------------------------------------------
+
+class MemoryScope(str, Enum):
+    """Scope of access and visibility for engineering memory."""
+
+    PERSONAL = "personal"        # Private to the individual developer / author
+    TEAM = "team"                # Shared across members of an engineering team
+    REPOSITORY = "repository"    # Grounded to the codebase / repository for all authorized contributors
+
+
+class MemoryCategory(str, Enum):
+    """Categorization of distilled engineering knowledge."""
+
+    ARCHITECTURE_DECISION = "architecture_decision"  # High-level architecture and system topology decisions
+    BUG_ROOT_CAUSE = "bug_root_cause"                # Deep root-cause investigations, fixes, and regression postmortems
+    IMPLEMENTATION_SUMMARY = "implementation_summary"# Technical synthesis of feature implementations and patterns
+    API_DECISION = "api_decision"                    # API design choices, contracts, schemas, and deprecations
+    IMPORTANT_REFACTOR = "important_refactor"        # Large-scale refactor milestones, decoupling, and code reorganization
+    DEPLOYMENT_LESSON = "deployment_lesson"          # CI/CD, migration, infrastructure, and deployment operational lessons
+    RECURRING_SOLUTION = "recurring_solution"        # Reusable design patterns, troubleshooting recipes, and best practices
+    GENERAL = "general"                              # General engineering insight
+
+
+@dataclass
+class User:
+    """Engineer / user within the team memory system."""
+
+    id: str
+    name: str
+    email: str = ""
+    role: str = "engineer"  # e.g., "engineer", "lead", "architect", "reviewer"
+    created_at: str = field(default_factory=utc_now_iso)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize user to dictionary."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "email": self.email,
+            "role": self.role,
+            "created_at": self.created_at,
+            "metadata": dict(self.metadata),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> User:
+        """Reconstruct User from dictionary."""
+        return cls(
+            id=str(data["id"]),
+            name=str(data.get("name", "")),
+            email=str(data.get("email", "")),
+            role=str(data.get("role", "engineer")),
+            created_at=str(data.get("created_at") or utc_now_iso()),
+            metadata=dict(data.get("metadata", {})),
+        )
+
+
+@dataclass
+class Team:
+    """Engineering team sharing collaborative memory."""
+
+    id: str
+    name: str
+    description: str = ""
+    created_at: str = field(default_factory=utc_now_iso)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize team to dictionary."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "created_at": self.created_at,
+            "metadata": dict(self.metadata),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Team:
+        """Reconstruct Team from dictionary."""
+        return cls(
+            id=str(data["id"]),
+            name=str(data.get("name", "")),
+            description=str(data.get("description", "")),
+            created_at=str(data.get("created_at") or utc_now_iso()),
+            metadata=dict(data.get("metadata", {})),
+        )
+
+
+@dataclass
+class TeamMembership:
+    """Membership relationship associating a User with a Team."""
+
+    user_id: str
+    team_id: str
+    role: str = "member"  # "lead", "member", "contributor"
+    joined_at: str = field(default_factory=utc_now_iso)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize membership to dictionary."""
+        return {
+            "user_id": self.user_id,
+            "team_id": self.team_id,
+            "role": self.role,
+            "joined_at": self.joined_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TeamMembership:
+        """Reconstruct TeamMembership from dictionary."""
+        return cls(
+            user_id=str(data["user_id"]),
+            team_id=str(data["team_id"]),
+            role=str(data.get("role", "member")),
+            joined_at=str(data.get("joined_at") or utc_now_iso()),
+        )
+
+
+@dataclass
+class Project:
+    """Project grouping repositories, decisions, and milestones."""
+
+    id: str
+    name: str
+    description: str = ""
+    team_id: str | None = None
+    created_at: str = field(default_factory=utc_now_iso)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize Project to dictionary."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "team_id": self.team_id,
+            "created_at": self.created_at,
+            "metadata": dict(self.metadata),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Project:
+        """Reconstruct Project from dictionary."""
+        return cls(
+            id=str(data["id"]),
+            name=str(data.get("name", "")),
+            description=str(data.get("description", "")),
+            team_id=data.get("team_id"),
+            created_at=str(data.get("created_at") or utc_now_iso()),
+            metadata=dict(data.get("metadata", {})),
+        )
+
+
+@dataclass
+class AISession:
+    """Engineering AI session producing distilled knowledge units."""
+
+    id: str
+    title: str
+    user_id: str
+    repository_id: str | None = None
+    team_id: str | None = None
+    started_at: str = field(default_factory=utc_now_iso)
+    ended_at: str | None = None
+    summary: str = ""
+    query_count: int = 0
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize AISession to dictionary."""
+        return {
+            "id": self.id,
+            "title": self.title,
+            "user_id": self.user_id,
+            "repository_id": self.repository_id,
+            "team_id": self.team_id,
+            "started_at": self.started_at,
+            "ended_at": self.ended_at,
+            "summary": self.summary,
+            "query_count": self.query_count,
+            "metadata": dict(self.metadata),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AISession:
+        """Reconstruct AISession from dictionary."""
+        return cls(
+            id=str(data["id"]),
+            title=str(data.get("title", "")),
+            user_id=str(data["user_id"]),
+            repository_id=data.get("repository_id"),
+            team_id=data.get("team_id"),
+            started_at=str(data.get("started_at") or utc_now_iso()),
+            ended_at=data.get("ended_at"),
+            summary=str(data.get("summary", "")),
+            query_count=int(data.get("query_count", 0)),
+            metadata=dict(data.get("metadata", {})),
+        )
+
+
+@dataclass
+class AISessionRecord:
+    """Detailed record of an AI-assisted engineering session."""
+
+    session_id: str
+    user_id: str
+    repository_id: str
+    prompt: str
+    response_summary: str
+    affected_files: list[str] = field(default_factory=list)
+    affected_symbols: list[str] = field(default_factory=list)
+    engineering_decisions: list[str] = field(default_factory=list)
+    timestamp: str = field(default_factory=utc_now_iso)
+    visibility: str = "repository"  # "personal", "team", "repository"
+    team_id: str | None = None
+    raw_transcript: list[dict[str, Any]] | None = None  # None by default!
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize AISessionRecord to dictionary."""
+        return {
+            "session_id": self.session_id,
+            "user_id": self.user_id,
+            "repository_id": self.repository_id,
+            "prompt": self.prompt,
+            "response_summary": self.response_summary,
+            "affected_files": list(self.affected_files),
+            "affected_symbols": list(self.affected_symbols),
+            "engineering_decisions": list(self.engineering_decisions),
+            "timestamp": self.timestamp,
+            "visibility": self.visibility,
+            "team_id": self.team_id,
+            "raw_transcript": self.raw_transcript,
+            "metadata": dict(self.metadata),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AISessionRecord:
+        """Reconstruct AISessionRecord from dictionary."""
+        return cls(
+            session_id=str(data.get("session_id") or data.get("id", "")),
+            user_id=str(data.get("user_id", "")),
+            repository_id=str(data.get("repository_id", "")),
+            prompt=str(data.get("prompt", "")),
+            response_summary=str(data.get("response_summary") or data.get("summary", "")),
+            affected_files=list(data.get("affected_files", [])),
+            affected_symbols=list(data.get("affected_symbols", [])),
+            engineering_decisions=list(data.get("engineering_decisions", [])),
+            timestamp=str(data.get("timestamp") or data.get("started_at") or utc_now_iso()),
+            visibility=str(data.get("visibility") or data.get("scope", "repository")),
+            team_id=data.get("team_id"),
+            raw_transcript=data.get("raw_transcript"),
+            metadata=dict(data.get("metadata", {})),
+        )
+
+
+@dataclass
+class RecordSessionResponse:
+    """Response returned upon recording an AI development session."""
+
+    session: AISessionRecord
+    distilled_memories: list[Memory] = field(default_factory=list)
+    decisions: list[EngineeringDecision] = field(default_factory=list)
+    status: str = "recorded"
+    message: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize RecordSessionResponse to dictionary."""
+        return {
+            "session": self.session.to_dict(),
+            "distilled_memories": [m.to_dict() for m in self.distilled_memories],
+            "decisions": [d.to_dict() for d in self.decisions],
+            "status": self.status,
+            "message": self.message,
+        }
+
+
+@dataclass
+class EngineeringEvent:
+    """Significant milestone, incident, or engineering occurrence."""
+
+    id: str
+    event_type: str  # e.g., "pr_merged", "incident_postmortem", "architecture_review", "deploy_failed"
+    title: str
+    description: str
+    timestamp: str = field(default_factory=utc_now_iso)
+    repository_id: str | None = None
+    team_id: str | None = None
+    user_id: str | None = None
+    external_ref: str | None = None  # e.g., PR #123, commit hash, Jira/Linear key
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize EngineeringEvent to dictionary."""
+        return {
+            "id": self.id,
+            "event_type": self.event_type,
+            "title": self.title,
+            "description": self.description,
+            "timestamp": self.timestamp,
+            "repository_id": self.repository_id,
+            "team_id": self.team_id,
+            "user_id": self.user_id,
+            "external_ref": self.external_ref,
+            "metadata": dict(self.metadata),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EngineeringEvent:
+        """Reconstruct EngineeringEvent from dictionary."""
+        return cls(
+            id=str(data["id"]),
+            event_type=str(data.get("event_type", "event")),
+            title=str(data.get("title", "")),
+            description=str(data.get("description", "")),
+            timestamp=str(data.get("timestamp") or utc_now_iso()),
+            repository_id=data.get("repository_id"),
+            team_id=data.get("team_id"),
+            user_id=data.get("user_id"),
+            external_ref=data.get("external_ref"),
+            metadata=dict(data.get("metadata", {})),
+        )
+
+
+@dataclass
+class EngineeringDecision:
+    """Formal architectural or design decision with rationale and trade-offs."""
+
+    id: str
+    title: str
+    rationale: str
+    status: str = "accepted"  # "proposed", "accepted", "deprecated", "superseded"
+    category: str = "architecture"  # "architecture", "api_design", "security", "database", "performance"
+    scope: str = "team"  # "personal", "team", "repository"
+    author_id: str | None = None
+    team_id: str | None = None
+    repository_id: str | None = None
+    project_id: str | None = None
+    alternatives_considered: list[str] = field(default_factory=list)
+    trade_offs: list[str] = field(default_factory=list)
+    superseded_by: str | None = None
+    created_at: str = field(default_factory=utc_now_iso)
+    updated_at: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize EngineeringDecision to dictionary."""
+        return {
+            "id": self.id,
+            "title": self.title,
+            "rationale": self.rationale,
+            "status": self.status,
+            "category": self.category,
+            "scope": self.scope,
+            "author_id": self.author_id,
+            "team_id": self.team_id,
+            "repository_id": self.repository_id,
+            "project_id": self.project_id,
+            "alternatives_considered": list(self.alternatives_considered),
+            "trade_offs": list(self.trade_offs),
+            "superseded_by": self.superseded_by,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "metadata": dict(self.metadata),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EngineeringDecision:
+        """Reconstruct EngineeringDecision from dictionary."""
+        return cls(
+            id=str(data["id"]),
+            title=str(data.get("title", "")),
+            rationale=str(data.get("rationale", "")),
+            status=str(data.get("status", "accepted")),
+            category=str(data.get("category", "architecture")),
+            scope=str(data.get("scope", "team")),
+            author_id=data.get("author_id"),
+            team_id=data.get("team_id"),
+            repository_id=data.get("repository_id"),
+            project_id=data.get("project_id"),
+            alternatives_considered=list(data.get("alternatives_considered", [])),
+            trade_offs=list(data.get("trade_offs", [])),
+            superseded_by=data.get("superseded_by"),
+            created_at=str(data.get("created_at") or utc_now_iso()),
+            updated_at=data.get("updated_at"),
+            metadata=dict(data.get("metadata", {})),
+        )
+
+
+@dataclass
+class MemoryProvenance:
+    """Traceability provenance linking a memory to its origins."""
+
+    source_type: str = "manual"  # "ai_session_distillation", "pr_review", "incident_postmortem", "rfc_review", "manual"
+    source_id: str = ""
+    file_paths: list[str] = field(default_factory=list)
+    symbol_names: list[str] = field(default_factory=list)
+    document_paths: list[str] = field(default_factory=list)
+    commit_shas: list[str] = field(default_factory=list)
+    confidence: float = 1.0
+    created_at: str = field(default_factory=utc_now_iso)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize MemoryProvenance to dictionary."""
+        return {
+            "source_type": self.source_type,
+            "source_id": self.source_id,
+            "file_paths": list(self.file_paths),
+            "symbol_names": list(self.symbol_names),
+            "document_paths": list(self.document_paths),
+            "commit_shas": list(self.commit_shas),
+            "confidence": round(self.confidence, 4),
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> MemoryProvenance:
+        """Reconstruct MemoryProvenance from dictionary."""
+        return cls(
+            source_type=str(data.get("source_type", "manual")),
+            source_id=str(data.get("source_id", "")),
+            file_paths=list(data.get("file_paths", [])),
+            symbol_names=list(data.get("symbol_names", [])),
+            document_paths=list(data.get("document_paths", [])),
+            commit_shas=list(data.get("commit_shas", [])),
+            confidence=float(data.get("confidence", 1.0)),
+            created_at=str(data.get("created_at") or utc_now_iso()),
+        )
+
+
+@dataclass
+class Memory:
+    """Distilled unit of engineering knowledge in the Team Memory subsystem."""
+
+    id: str
+    title: str
+    content: str  # Structured engineering insight (never raw conversational chat transcripts)
+    category: str = "general"  # ArchitectureDecision, BugRootCause, etc.
+    scope: str = "team"  # "personal", "team", "repository"
+    author_id: str = ""
+    team_id: str | None = None
+    repository_id: str | None = None
+    project_id: str | None = None
+    session_id: str | None = None
+    event_id: str | None = None
+    decision_id: str | None = None
+    impact_areas: list[str] = field(default_factory=list)  # Files, modules, services affected
+    actionable_takeaways: list[str] = field(default_factory=list)
+    provenance: MemoryProvenance = field(default_factory=MemoryProvenance)
+    confidence: float = 1.0
+    status: str = "active"  # "active", "superseded", "deprecated"
+    superseded_by: str | None = None
+    created_at: str = field(default_factory=utc_now_iso)
+    updated_at: str = field(default_factory=utc_now_iso)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize Memory to dictionary."""
+        return {
+            "id": self.id,
+            "title": self.title,
+            "content": self.content,
+            "category": self.category,
+            "scope": self.scope,
+            "author_id": self.author_id,
+            "team_id": self.team_id,
+            "repository_id": self.repository_id,
+            "project_id": self.project_id,
+            "session_id": self.session_id,
+            "event_id": self.event_id,
+            "decision_id": self.decision_id,
+            "impact_areas": list(self.impact_areas),
+            "actionable_takeaways": list(self.actionable_takeaways),
+            "provenance": self.provenance.to_dict(),
+            "confidence": round(self.confidence, 4),
+            "status": self.status,
+            "superseded_by": self.superseded_by,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "metadata": dict(self.metadata),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Memory:
+        """Reconstruct Memory from dictionary."""
+        prov_data = data.get("provenance")
+        prov = MemoryProvenance.from_dict(prov_data) if isinstance(prov_data, dict) else MemoryProvenance()
+        return cls(
+            id=str(data["id"]),
+            title=str(data.get("title", "")),
+            content=str(data.get("content", "")),
+            category=str(data.get("category", "general")),
+            scope=str(data.get("scope", "team")),
+            author_id=str(data.get("author_id", "")),
+            team_id=data.get("team_id"),
+            repository_id=data.get("repository_id"),
+            project_id=data.get("project_id"),
+            session_id=data.get("session_id"),
+            event_id=data.get("event_id"),
+            decision_id=data.get("decision_id"),
+            impact_areas=list(data.get("impact_areas", [])),
+            actionable_takeaways=list(data.get("actionable_takeaways", [])),
+            provenance=prov,
+            confidence=float(data.get("confidence", 1.0)),
+            status=str(data.get("status", "active")),
+            superseded_by=data.get("superseded_by"),
+            created_at=str(data.get("created_at") or utc_now_iso()),
+            updated_at=str(data.get("updated_at") or utc_now_iso()),
+            metadata=dict(data.get("metadata", {})),
+        )
+
+    def to_hybrid_result(self, score: float = 1.0) -> HybridRetrievalResult:
+        """Convert Memory into a normalized HybridRetrievalResult for ACO consumption."""
+        source_loc = self.repository_id or self.team_id or "team_memory"
+        prov = ResultProvenance(
+            source_type=self.provenance.source_type or "team_memory",
+            repository_id=self.repository_id or "",
+            created_at=self.created_at,
+            channels=["team_memory"],
+        )
+        return HybridRetrievalResult(
+            entity=self.title,
+            type=f"Memory ({self.category})",
+            source="team_memory",
+            repository=self.repository_id or "",
+            file_or_document=source_loc,
+            content_snippet=self.content,
+            node_id=self.id,
+            confidence=self.confidence,
+            score=score,
+            provenance=prov,
+            metadata={
+                "memory_id": self.id,
+                "scope": self.scope,
+                "category": self.category,
+                "author_id": self.author_id,
+                "team_id": self.team_id,
+                "impact_areas": self.impact_areas,
+                "actionable_takeaways": self.actionable_takeaways,
+                "created_at": self.created_at,
+                "engineering_decisions": [self.title] if "decision" in self.category.lower() else [],
+            },
         )
 
 

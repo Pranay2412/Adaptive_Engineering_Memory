@@ -2,7 +2,7 @@
 
 ## 1. Node Labels & Properties
 
-The unified schema represents both source code structures and technical documentation entities within a single Neo4j database.
+The unified schema represents source code structures, technical documentation entities, and engineering team memory within a single Neo4j database.
 
 ### `CodeSymbol`
 Represents AST code entities (classes, methods, functions, modules, interfaces).
@@ -32,6 +32,15 @@ Represents architectural concepts, requirements, constraints, and RFC entities e
 - **`Module`**: Architectural module or package folder.
 - **`Document`**: Raw source documentation file node.
 
+### Team Memory Nodes
+- **`User`**: Team engineer or agent contributor (`id`, `name`, `email`, `role`, `created_at`).
+- **`Team`**: Engineering group or domain pod (`id`, `name`, `description`, `created_at`).
+- **`Project`**: Higher-level project container spanning repositories (`id`, `name`, `team_id`, `created_at`).
+- **`AISession`**: Interactive AI development session (`id`, `title`, `user_id`, `repository_id`, `started_at`, `summary`).
+- **`EngineeringEvent`**: Milestones, incident resolutions, releases (`id`, `event_type`, `title`, `timestamp`, `repository_id`).
+- **`EngineeringDecision`**: Formal architecture design records (ADRs) (`id`, `title`, `rationale`, `status`, `alternatives_json`, `trade_offs_json`).
+- **`Memory`**: Distilled engineering knowledge card (`id`, `title`, `content`, `category`, `scope`, `author_id`, `confidence`, `status`).
+
 ---
 
 ## 2. Relationships
@@ -45,6 +54,26 @@ Represents architectural concepts, requirements, constraints, and RFC entities e
 | **`DEFINES`** | `Module` / `CodeSymbol` | `CodeSymbol` | Lexical scope containment. |
 | **`DEPENDS_ON`** | `Module` / `CodeSymbol` | `Module` / `CodeSymbol` | Architectural dependency relationship. |
 | **`MOTIVATES`** | `DocumentEntity` | `DocumentEntity` | Architectural decision or rationale linkage. |
+| **`MEMBER_OF`** | `User` | `Team` | Engineer membership in an engineering team or pod. |
+| **`OWNS_PROJECT`** | `Team` | `Project` | Engineering team ownership of a project. |
+| **`CONTAINS_REPO`** | `Project` | `Repository` | Project inclusion of a code repository. |
+| **`INITIATED_SESSION`**| `User` | `AISession` | Author of an interactive AI engineering session. |
+| **`IN_REPOSITORY`** | `AISession` | `Repository` | Codebase context where the session occurred. |
+| **`TOUCHES_SYMBOL`**| `AISession` | `CodeSymbol` | Code symbol affected, inspected, or refactored in the session. |
+| **`TOUCHES_FILE`**  | `AISession` | `Document` | Source file or document affected or inspected in the session. |
+| **`AUTHORED`** | `User` | `Memory` | Author or owner of an engineering memory card. |
+| **`SHARED_WITH_TEAM`**| `Memory` | `Team` | Team-scoped visibility association. |
+| **`SCOPED_TO_REPO`** | `Memory` | `Repository` | Repository-scoped grounding association. |
+| **`PART_OF_PROJECT`** | `Memory` | `Project` | Project association for engineering memory. |
+| **`EXTRACTED_FROM_SESSION`** | `Memory` | `AISession` | Provenance trace to the originating AI session. |
+| **`ORIGINATED_FROM_EVENT`** | `Memory` | `EngineeringEvent` | Traceability to an incident or milestone event. |
+| **`JUSTIFIED_BY`** | `Memory` | `EngineeringDecision` | Rationale grounding in an engineering decision. |
+| **`REFERENCES_SYMBOL`**| `Memory` | `CodeSymbol` | Grounding link to affected code symbols. |
+| **`REFERENCES_DOC`** | `Memory` | `Document` | Grounding link to related documentation files. |
+| **`SUPERSEDES`** | `Memory` | `Memory` | Evolution graph linking older memory to newer replacement. |
+| **`AUTHORED_BY`** | `EngineeringDecision` | `User` | Author of an architecture decision. |
+| **`AFFECTS_REPO`** | `EngineeringDecision` | `Repository` | Codebase affected by a design decision. |
+| **`APPLIES_TO_TEAM`** | `EngineeringDecision` | `Team` | Engineering team governed by a decision. |
 
 ### First-Class Properties on `SPECIFIES`
 The cross-linking bridge stores first-class properties on `SPECIFIES` edges:
@@ -62,13 +91,16 @@ The cross-linking bridge stores first-class properties on `SPECIFIES` edges:
 ## 3. Database Indexes & Constraints
 
 Initialized automatically via `Neo4jMemoryStore.initialize_schema()`:
-- `INDEX ON :CodeSymbol(name)`
-- `INDEX ON :CodeSymbol(id)`
-- `INDEX ON :CodeSymbol(repository_id)`
-- `INDEX ON :DocumentEntity(name)`
-- `INDEX ON :DocumentEntity(id)`
-- `INDEX ON :DocumentEntity(repository_id)`
-- `INDEX ON :Repository(id)`
-- `INDEX ON :Module(id)`
-- `INDEX ON :Document(id)`
+- `INDEX ON :CodeSymbol(name)`, `id`, `qualified_name`, `module`, `repository_id`
+- `INDEX ON :DocumentEntity(name)`, `id`, `type`, `source_document`, `repository_id`
+- `INDEX ON :Repository(id)`, `name`
+- `INDEX ON :Module(id)`, `name`, `repository_id`
+- `INDEX ON :Document(id)`, `path`, `repository_id`
+- `INDEX ON :User(id)`, `email`
+- `INDEX ON :Team(id)`, `name`
+- `INDEX ON :Project(id)`, `team_id`
+- `INDEX ON :AISession(id)`, `user_id`, `repository_id`
+- `INDEX ON :EngineeringEvent(id)`, `repository_id`, `event_type`
+- `INDEX ON :EngineeringDecision(id)`, `repository_id`, `team_id`, `category`
+- `INDEX ON :Memory(id)`, `scope`, `category`, `repository_id`, `team_id`, `author_id`, `status`
 - `RELATIONSHIP INDEX ON :SPECIFIES(confidence)`

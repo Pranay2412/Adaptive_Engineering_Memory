@@ -32,6 +32,19 @@ Adaptive Engineering Memory constructs a unified cognitive repository knowledge 
    - Enforces non-negotiable provenance preservation: never drops source identifiers, symbols, relationships, recent changes, or engineering decisions; fail-safe `ProvenanceGuardrail` automatically restores traceability ledgers.
    - Provides side-by-side mode comparison (`compare_optimization_modes`) and full audit metrics.
 
+7. **Team Memory Subsystem (`backend/team_memory.py`, `backend/team_memory_store.py`)**:
+   - Captures and organizes distilled engineering knowledge (architecture decisions, bug root causes, implementation summaries, API decisions, refactors, deployment lessons, recurring solutions) rather than noisy conversational chat transcripts.
+   - Supports multi-tenant scoping isolation across `personal`, `team`, and `repository` boundaries.
+   - Provides dual persistence in SQLite/PostgreSQL with immutable revision history (`memory_revisions`) and rich Neo4j graph relationships (`AUTHORED`, `SHARED_WITH_TEAM`, `SCOPED_TO_REPO`, `SUPERSEDES`, `REFERENCES_SYMBOL`).
+   - Distills knowledge cards and integrates seamlessly with the ACO retrieval pipeline via `.to_hybrid_result()`.
+
+8. **AI Session Memory & Knowledge Distillation (`backend/session_memory.py`)**:
+   - API for recording AI-assisted development sessions across 11 core fields (`session_id`, `user_id`, `repository_id`, `prompt`, `response_summary`, `affected_files`, `affected_symbols`, `engineering_decisions`, `timestamp`, `visibility`, `team_id`).
+   - Enforces a high-signal storage policy: never persists raw chat transcripts by default (`store_raw_transcript=False`), analyzing conversation messages in-memory before discarding ephemeral noise.
+   - Automated summarizer (`AISessionKnowledgeSummarizer`) classifies engineering categories, standardizes headlines, extracts affected files/symbols, and links formal `EngineeringDecision` objects.
+   - Seamlessly retrievable by ACO (`retrieve_for_aco()`), ranked with confidence and session affinity, and packed into a dedicated `"Engineering Decisions & AI Session Memory"` prompt section.
+   - Out-of-the-box REST/JSON API endpoints (`record_ai_session_api`, `get_ai_session_api`, `query_ai_sessions_api`).
+
 ---
 
 ## Requirements
@@ -162,6 +175,45 @@ context = orchestrator.orchestrate(
 
 ---
 
+## AI Session Memory & Knowledge Distillation
+
+Record interactive AI development sessions and retrieve distilled knowledge cards within ACO:
+
+```python
+from backend import AISessionMemoryService, orchestrate_context
+
+# 1. Initialize session memory service
+session_service = AISessionMemoryService()
+
+# 2. Record an AI development session (raw conversation is analyzed in-memory and discarded by default)
+session_service.record_session(
+    session_id="session-jwt-migration",
+    user_id="dev-alice",
+    repository_id="core-auth",
+    prompt="Migrate authentication tokens from symmetric HS256 to asymmetric RS256",
+    response_summary="Implemented RS256 token signing with private key rotation and public key JWKS caching.",
+    affected_files=["services/auth_service.py", "security/jwt_manager.py"],
+    affected_symbols=["AuthService", "JWTManager", "rotate_keys"],
+    engineering_decisions=["Use RS256 asymmetric signatures and cache JWKS with 1h TTL"],
+    visibility="repository",  # "personal", "team", or "repository"
+)
+
+# 3. Retrieve and pack prompt context via ACO
+context = orchestrate_context(
+    query="How does JWT authentication work in core-auth?",
+    user_id="dev-alice",
+    repository_id="core-auth",
+    session_memory_service=session_service,
+    max_tokens=2000,
+)
+
+# Rendered context includes the dedicated section:
+# ## Engineering Decisions & AI Session Memory
+# - [Architecture Decision] Use RS256 asymmetric signatures and cache JWKS with 1h TTL
+```
+
+---
+
 ## Running Tests
 
 All unit tests run completely offline with zero external network or database dependencies using mock drivers and providers:
@@ -170,7 +222,9 @@ All unit tests run completely offline with zero external network or database dep
 python -m unittest discover -s tests -v
 ```
 
-Test suite breakdown (**150 tests passed**):
+Test suite breakdown (**183 tests passed**):
+- `test_session_memory.py`: Recording across all 11 fields, privacy-conscious transcript policies, heuristic categorization, ADR distillation, multi-tenant scoping, Neo4j graph synchronization, and ACO retrieval/packing.
+- `test_team_memory.py`: Multi-tenant memory management, personal/team/repo scoping isolation, immutable revisions (`memory_revisions`), ADR tracking, and graph schemas.
 - `test_token_optimizer.py`: Provenance invariants, LLM compression, 4-stage pipeline execution, 3-mode comparison (`none`, `deterministic`, `llm`), budget stopping, and orchestrator integration.
 - `test_orchestrator.py`: Intent classification across all 8 intents, strategy selection, token budgeting, and ACO orchestration.
 - `test_ranking.py`: All 8 ranking signals, weight normalization, deterministic reordering, score exposure, and tie-breaking.
@@ -184,6 +238,7 @@ Test suite breakdown (**150 tests passed**):
 ## Detailed Documentation
 
 - [System Architecture](docs/architecture.md)
+- [Team & AI Session Memory Subsystem](docs/team_memory.md)
 - [Synapse Token Optimization Engine](docs/token_optimization.md)
 - [Hybrid Retrieval & Configurable Ranking](docs/retrieval_and_ranking.md)
 - [Adaptive Context Orchestrator (ACO) Guide](docs/orchestrator_guide.md)
