@@ -227,6 +227,40 @@ class Neo4jMemoryStore:
         )
         return len(rows)
 
+    def delete_code_symbols_by_file(self, repository_id: str, file_path: str) -> int:
+        """Detach and delete all CodeSymbol nodes associated with a file path."""
+        norm_path = file_path.replace("\\", "/").strip().lstrip("./")
+        query = (
+            "MATCH (c:CodeSymbol {repository_id: $repo_id}) "
+            "WHERE c.file = $file_path OR c.source_file = $file_path "
+            "DETACH DELETE c "
+            "RETURN count(c) AS deleted"
+        )
+        with self.driver.session() as session:
+            try:
+                result = session.run(query, repo_id=repository_id, file_path=norm_path)
+                record = result.single()
+                return int(record["deleted"]) if record else 0
+            except Exception:
+                return 0
+
+    def delete_document_entities_by_path(self, repository_id: str, document_path: str) -> int:
+        """Detach and delete all DocumentEntity nodes associated with a document path."""
+        norm_path = document_path.replace("\\", "/").strip().lstrip("./")
+        query = (
+            "MATCH (d:DocumentEntity {repository_id: $repo_id}) "
+            "WHERE d.document_path = $doc_path OR d.source_document = $doc_path "
+            "DETACH DELETE d "
+            "RETURN count(d) AS deleted"
+        )
+        with self.driver.session() as session:
+            try:
+                result = session.run(query, repo_id=repository_id, doc_path=norm_path)
+                record = result.single()
+                return int(record["deleted"]) if record else 0
+            except Exception:
+                return 0
+
     def upsert_repositories(self, repositories: Iterable[Repository]) -> int:
         rows = [
             {

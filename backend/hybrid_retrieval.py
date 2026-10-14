@@ -121,6 +121,94 @@ class SemanticKnowledgeIndex:
         scored.sort(key=lambda item: item[1], reverse=True)
         return scored[:top_n]
 
+    def remove_symbols_by_file(self, file_path: str) -> int:
+        """Remove all indexed symbols belonging to a specific file."""
+        norm_target = file_path.replace("\\", "/").strip().lstrip("./")
+        new_symbols: list[CodeSymbol] = []
+        new_vectors: list[list[float]] = []
+        removed = 0
+
+        for sym, vec in zip(self.symbols, self.symbol_vectors):
+            sym_file = (sym.source_file or sym.file or "").replace("\\", "/").strip().lstrip("./")
+            if sym_file == norm_target:
+                removed += 1
+            else:
+                new_symbols.append(sym)
+                new_vectors.append(vec)
+
+        self.symbols = new_symbols
+        self.symbol_vectors = new_vectors
+        return removed
+
+    def remove_entities_by_path(self, document_path: str) -> int:
+        """Remove all indexed document entities belonging to a specific document path."""
+        norm_target = document_path.replace("\\", "/").strip().lstrip("./")
+        new_entities: list[DocumentEntity] = []
+        new_vectors: list[list[float]] = []
+        removed = 0
+
+        for ent, vec in zip(self.entities, self.entity_vectors):
+            ent_path = (ent.document_path or ent.source_file or ent.source_document or "").replace("\\", "/").strip().lstrip("./")
+            if ent_path == norm_target:
+                removed += 1
+            else:
+                new_entities.append(ent)
+                new_vectors.append(vec)
+
+        self.entities = new_entities
+        self.entity_vectors = new_vectors
+        return removed
+
+    def upsert_symbols(self, symbols: list[CodeSymbol], batch_size: int = 128) -> int:
+        """Incrementally embed and add new/updated symbols, replacing existing entries by symbol ID."""
+        if not symbols:
+            return 0
+
+        incoming_ids = {s.id for s in symbols}
+        filtered_symbols: list[CodeSymbol] = []
+        filtered_vectors: list[list[float]] = []
+        for s, v in zip(self.symbols, self.symbol_vectors):
+            if s.id not in incoming_ids:
+                filtered_symbols.append(s)
+                filtered_vectors.append(v)
+
+        sym_texts = [code_symbol_to_text(s) for s in symbols]
+        new_vectors: list[list[float]] = []
+        for i in range(0, len(sym_texts), batch_size):
+            chunk = sym_texts[i : i + batch_size]
+            vecs = self.provider.embed_batch(chunk)
+            for vec in vecs:
+                new_vectors.append(normalize_vector(vec))
+
+        self.symbols = filtered_symbols + list(symbols)
+        self.symbol_vectors = filtered_vectors + new_vectors
+        return len(symbols)
+
+    def upsert_entities(self, entities: list[DocumentEntity], batch_size: int = 128) -> int:
+        """Incrementally embed and add new/updated entities, replacing existing entries by entity ID."""
+        if not entities:
+            return 0
+
+        incoming_ids = {e.id for e in entities}
+        filtered_entities: list[DocumentEntity] = []
+        filtered_vectors: list[list[float]] = []
+        for e, v in zip(self.entities, self.entity_vectors):
+            if e.id not in incoming_ids:
+                filtered_entities.append(e)
+                filtered_vectors.append(v)
+
+        ent_texts = [document_entity_to_text(e) for e in entities]
+        new_vectors: list[list[float]] = []
+        for i in range(0, len(ent_texts), batch_size):
+            chunk = ent_texts[i : i + batch_size]
+            vecs = self.provider.embed_batch(chunk)
+            for vec in vecs:
+                new_vectors.append(normalize_vector(vec))
+
+        self.entities = filtered_entities + list(entities)
+        self.entity_vectors = filtered_vectors + new_vectors
+        return len(entities)
+
 
 class HybridRetrievalService:
     """Unified hybrid retrieval orchestrator for Adaptive Engineering Memory.
