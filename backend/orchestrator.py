@@ -530,11 +530,16 @@ class BaseContextPacker(ABC):
 class AdaptiveContextPacker(BaseContextPacker):
     """Assembles structured, sectioned Markdown context budgeted to token limits."""
 
-    @staticmethod
-    def estimate_tokens(text: str) -> int:
-        """Estimate token count (approx. 4 characters per token)."""
+    def __init__(self, tokenizer: str | Callable[[str], int] | None = None) -> None:
+        self.tokenizer = tokenizer
+
+    def estimate_tokens(self, text: str) -> int:
+        """Estimate token count (approx. 4 characters per token or precise tokenizer if configured)."""
         if not text:
             return 0
+        if self.tokenizer is not None:
+            from .token_optimizer import TokenEstimator
+            return TokenEstimator.count_tokens(text, tokenizer=self.tokenizer)
         return max(1, len(text) // 4)
 
     def pack(
@@ -586,44 +591,39 @@ class AdaptiveContextPacker(BaseContextPacker):
         ]
 
         # Assemble content respecting token budget
-        context_blocks = [header_text]
-        used_tokens = header_tokens
+        context_blocks = [header_text] if (token_budget is None or header_tokens <= token_budget) else []
+        used_tokens = self.estimate_tokens("\n\n".join(context_blocks).strip())
 
         for section_title, section_items in sections:
             if not section_items:
                 continue
 
             section_header = f"\n#### {section_title}"
-            section_header_tokens = self.estimate_tokens(section_header)
-
-            if token_budget is not None and (used_tokens + section_header_tokens >= token_budget):
+            candidate_blocks = context_blocks + [section_header]
+            if token_budget is not None and self.estimate_tokens("\n\n".join(candidate_blocks).strip()) > token_budget:
                 break
 
             items_in_section: list[str] = []
 
             for item in section_items:
                 block = item.to_context_str()
-                block_tokens = self.estimate_tokens(block)
 
                 if token_budget is not None:
-                    if used_tokens + block_tokens > token_budget:
+                    test_blocks = context_blocks + [section_header] + items_in_section + [block]
+                    if self.estimate_tokens("\n\n".join(test_blocks).strip()) <= token_budget:
+                        items_in_section.append(block)
+                    else:
                         # Attempt compact one-line representation
                         compact = f"- `{item.entity}` ({item.type}) in `{item.file_or_document}` [score: {item.score:.2f}]"
-                        compact_tokens = self.estimate_tokens(compact)
-                        if used_tokens + compact_tokens <= token_budget:
+                        test_compact_blocks = context_blocks + [section_header] + items_in_section + [compact]
+                        if self.estimate_tokens("\n\n".join(test_compact_blocks).strip()) <= token_budget:
                             items_in_section.append(compact)
-                            used_tokens += compact_tokens
                         break
-                    else:
-                        items_in_section.append(block)
-                        used_tokens += block_tokens
                 else:
                     items_in_section.append(block)
-                    used_tokens += block_tokens
 
             if items_in_section:
                 context_blocks.append(section_header)
-                used_tokens += section_header_tokens
                 context_blocks.extend(items_in_section)
 
         final_context = "\n\n".join(context_blocks).strip()
@@ -639,8 +639,10 @@ class TokenOptimizedContextPacker(BaseContextPacker):
         optimizer: TokenOptimizationEngine | None = None,
         mode: OptimizationMode | str = OptimizationMode.DETERMINISTIC,
         llm_compressor: BaseLLMCompressor | None = None,
+        tokenizer: str | Callable[[str], int] | None = None,
     ) -> None:
-        self.optimizer = optimizer or TokenOptimizationEngine()
+        self.tokenizer = tokenizer
+        self.optimizer = optimizer or TokenOptimizationEngine(tokenizer=tokenizer)
         self.mode = mode
         self.llm_compressor = llm_compressor
 
@@ -664,6 +666,7 @@ class TokenOptimizedContextPacker(BaseContextPacker):
             intent_result=intent_result,
             mode=self.mode,
             llm_compressor=self.llm_compressor,
+            tokenizer=self.tokenizer,
         )
         return opt_res.optimized_context, opt_res.estimated_input_tokens
 

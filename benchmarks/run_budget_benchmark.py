@@ -81,6 +81,7 @@ def main() -> None:
     parser.add_argument("--mock-llm", action="store_true", help="Use mock LLM instead of live OpenAI API")
     parser.add_argument("--quick", action="store_true", help="Run a quick test with subset of budgets")
     parser.add_argument("--skip-llm-compression", action="store_true", help="Skip LLM compression mode")
+    parser.add_argument("--output-prefix", default="corrected_budget_benchmark", help="Prefix for output result files")
     args = parser.parse_args()
 
     print("================================================================================")
@@ -220,9 +221,10 @@ def main() -> None:
     }
 
     # 5. Export Results
-    json_path = repo_root / "benchmarks" / "results" / "budget_benchmark_results.json"
-    csv_path = repo_root / "benchmarks" / "results" / "budget_benchmark_results.csv"
-    md_path = repo_root / "docs" / "experiments" / "test_case_2_budget_benchmark.md"
+    prefix = args.output_prefix
+    json_path = repo_root / "benchmarks" / "results" / f"{prefix}_results.json"
+    csv_path = repo_root / "benchmarks" / "results" / f"{prefix}_results.csv"
+    md_path = repo_root / "docs" / "experiments" / f"test_case_2_{prefix}.md"
 
     export_budget_json(full_report, json_path)
     print(f"--> Exported JSON: {json_path}")

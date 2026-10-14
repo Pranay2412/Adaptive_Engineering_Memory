@@ -1,0 +1,76 @@
+query,category,intent,budget,optimization_mode,raw_candidate_count,retained_candidate_count,removed_candidate_count,estimated_context_tokens,precise_tiktoken_context_tokens,final_context_tokens,knowledge_context_tokens,system_prompt_tokens,user_query_tokens,other_prompt_tokens,actual_provider_prompt_tokens,output_completion_tokens,total_tokens,budget_utilization_pct,total_latency_ms,correctness,completeness,relevance,evidence_sufficiency,overall_quality,has_code,has_docs,has_arch,has_decisions,has_graph
+What modules import models.py?,structural,explanation,500,deterministic,15,7,8,336,484,484,484,30,6,5,529,250,779,96.8,5414.59,3.0,3.0,4.0,2.0,3.0,True,False,False,False,False
+How does authentication work with JWT?,implementation,explanation,500,deterministic,15,6,9,416,477,477,477,30,7,5,531,364,895,95.4,4490.38,5.0,4.0,5.0,4.0,4.5,True,True,True,True,False
+Which components call the authentication service?,dependency,explanation,500,deterministic,15,6,9,388,487,487,487,30,7,6,538,258,796,97.4,4109.45,4.0,4.0,5.0,4.0,4.25,True,True,True,True,False
+Where could JWT verification fail and what code is involved?,debugging,code_navigation,500,deterministic,13,6,7,388,495,495,495,30,11,5,545,240,785,99.0,3399.69,5.0,4.0,5.0,3.0,4.25,True,False,True,True,False
+Why was RS256 chosen for authentication?,architecture,explanation,500,deterministic,15,6,9,376,485,485,485,30,8,5,543,256,799,97.0,19853.84,5.0,4.0,5.0,4.0,4.5,True,True,True,True,False
+What modules import models.py?,structural,explanation,1000,deterministic,15,13,2,678,985,985,985,30,6,5,1025,316,1341,98.5,3916.9,2.0,2.0,3.0,1.0,2.0,True,False,True,True,False
+How does authentication work with JWT?,implementation,explanation,1000,deterministic,15,12,3,840,989,989,989,30,7,5,1043,369,1412,98.9,4855.48,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+Which components call the authentication service?,dependency,explanation,1000,deterministic,15,13,2,750,990,990,990,30,7,5,1036,196,1232,99.0,3366.27,5.0,4.0,5.0,4.0,4.5,True,True,True,True,False
+Where could JWT verification fail and what code is involved?,debugging,code_navigation,1000,deterministic,13,12,1,783,971,971,971,30,11,5,1017,282,1299,97.1,4761.09,5.0,4.0,5.0,4.0,4.5,True,False,True,True,False
+Why was RS256 chosen for authentication?,architecture,explanation,1000,deterministic,15,12,3,761,997,997,997,30,8,6,1059,98,1157,99.7,2679.91,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+What modules import models.py?,structural,explanation,1500,deterministic,15,15,0,866,1161,1161,1161,30,6,6,1201,205,1406,77.4,2714.08,2.0,2.0,3.0,2.0,2.25,True,False,True,True,False
+How does authentication work with JWT?,implementation,explanation,1500,deterministic,15,15,0,1058,1262,1262,1262,30,7,5,1311,444,1755,84.13,8271.99,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+Which components call the authentication service?,dependency,explanation,1500,deterministic,15,15,0,993,1215,1215,1215,30,7,6,1255,268,1523,81.0,4095.18,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+Where could JWT verification fail and what code is involved?,debugging,code_navigation,1500,deterministic,13,13,0,873,1069,1069,1069,30,11,5,1113,326,1439,71.27,6072.88,5.0,4.0,5.0,4.0,4.5,True,True,True,True,False
+Why was RS256 chosen for authentication?,architecture,explanation,1500,deterministic,15,15,0,988,1248,1248,1248,30,8,5,1303,108,1411,83.2,2138.0,5.0,4.0,5.0,4.0,4.5,True,True,True,True,False
+What modules import models.py?,structural,explanation,2500,deterministic,15,15,0,866,1161,1161,1161,30,6,6,1201,193,1394,46.44,2749.14,2.0,2.0,3.0,2.0,2.25,True,False,True,True,False
+How does authentication work with JWT?,implementation,explanation,2500,deterministic,15,15,0,1058,1262,1262,1262,30,7,5,1311,441,1752,50.48,4424.6,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+Which components call the authentication service?,dependency,explanation,2500,deterministic,15,15,0,993,1215,1215,1215,30,7,6,1255,258,1513,48.6,4286.06,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+Where could JWT verification fail and what code is involved?,debugging,code_navigation,2500,deterministic,13,13,0,873,1069,1069,1069,30,11,5,1113,245,1358,42.76,3435.08,5.0,4.0,5.0,4.0,4.5,True,True,True,True,False
+Why was RS256 chosen for authentication?,architecture,explanation,2500,deterministic,15,15,0,988,1248,1248,1248,30,8,5,1303,106,1409,49.92,2597.51,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+What modules import models.py?,structural,explanation,4000,deterministic,15,15,0,866,1161,1161,1161,30,6,6,1201,193,1394,29.03,2786.47,2.0,2.0,3.0,1.0,2.0,True,False,True,True,False
+How does authentication work with JWT?,implementation,explanation,4000,deterministic,15,15,0,1058,1262,1262,1262,30,7,5,1311,394,1705,31.55,5639.28,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+Which components call the authentication service?,dependency,explanation,4000,deterministic,15,15,0,993,1215,1215,1215,30,7,6,1255,268,1523,30.38,3378.63,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+Where could JWT verification fail and what code is involved?,debugging,code_navigation,4000,deterministic,13,13,0,873,1069,1069,1069,30,11,5,1113,283,1396,26.72,3922.81,5.0,4.0,5.0,4.0,4.5,True,True,True,True,False
+Why was RS256 chosen for authentication?,architecture,explanation,4000,deterministic,15,15,0,988,1248,1248,1248,30,8,5,1303,101,1404,31.2,2012.26,5.0,4.0,5.0,4.0,4.5,True,True,True,True,False
+What modules import models.py?,structural,explanation,unbounded,deterministic,15,15,0,866,1161,1161,1161,30,6,6,1201,193,1394,N/A,6342.94,2.0,2.0,3.0,1.0,2.0,True,False,True,True,False
+How does authentication work with JWT?,implementation,explanation,unbounded,deterministic,15,15,0,1059,1262,1262,1262,30,7,5,1311,348,1659,N/A,4073.58,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+Which components call the authentication service?,dependency,explanation,unbounded,deterministic,15,15,0,993,1215,1215,1215,30,7,6,1255,184,1439,N/A,2628.87,5.0,4.0,5.0,4.0,4.5,True,True,True,True,False
+Where could JWT verification fail and what code is involved?,debugging,code_navigation,unbounded,deterministic,13,13,0,874,1069,1069,1069,30,11,5,1113,232,1345,N/A,3133.73,5.0,4.0,5.0,4.0,4.5,True,True,True,True,False
+Why was RS256 chosen for authentication?,architecture,explanation,unbounded,deterministic,15,15,0,988,1248,1248,1248,30,8,5,1303,101,1404,N/A,2254.3,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+What modules import models.py?,structural,explanation,500,none,15,6,9,316,469,469,469,30,6,6,517,334,851,93.8,5181.19,3.0,3.0,4.0,3.0,3.25,True,False,True,True,False
+How does authentication work with JWT?,implementation,explanation,500,none,15,5,10,379,438,438,438,30,7,6,490,368,858,87.6,5481.57,5.0,5.0,5.0,4.0,4.75,True,False,True,True,False
+Which components call the authentication service?,dependency,explanation,500,none,15,6,9,360,489,489,489,30,7,6,540,148,688,97.8,2420.64,5.0,3.0,5.0,3.0,4.0,True,True,True,True,False
+Where could JWT verification fail and what code is involved?,debugging,code_navigation,500,none,13,6,7,389,496,496,496,30,11,6,547,159,706,99.2,2457.12,4.0,3.0,4.0,3.0,3.5,True,False,True,True,False
+Why was RS256 chosen for authentication?,architecture,explanation,500,none,15,5,10,374,444,444,444,30,8,6,503,97,600,88.8,3123.22,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+What modules import models.py?,structural,explanation,1000,none,15,13,2,678,985,985,985,30,6,6,1026,304,1330,98.5,4107.19,3.0,3.0,4.0,2.0,3.0,True,False,True,True,False
+How does authentication work with JWT?,implementation,explanation,1000,none,15,11,4,715,931,931,931,30,7,6,985,342,1327,93.1,4719.92,5.0,5.0,5.0,5.0,5.0,True,False,True,True,False
+Which components call the authentication service?,dependency,explanation,1000,none,15,12,3,718,955,955,955,30,7,5,1001,289,1290,95.5,4226.26,4.0,4.0,5.0,4.0,4.25,True,True,True,True,False
+Where could JWT verification fail and what code is involved?,debugging,code_navigation,1000,none,13,12,1,786,983,983,983,30,11,6,1034,202,1236,98.3,3203.87,4.0,3.0,4.0,3.0,3.5,True,True,True,True,False
+Why was RS256 chosen for authentication?,architecture,explanation,1000,none,15,12,3,758,998,998,998,30,8,6,1060,108,1168,99.8,5668.03,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+What modules import models.py?,structural,explanation,1500,none,15,15,0,865,1161,1161,1161,30,6,5,1200,318,1518,77.4,3393.94,2.0,2.0,3.0,2.0,2.25,True,False,True,True,False
+How does authentication work with JWT?,implementation,explanation,1500,none,15,15,0,1058,1262,1262,1262,30,7,5,1311,361,1672,84.13,3785.98,5.0,5.0,5.0,4.0,4.75,True,True,True,True,False
+Which components call the authentication service?,dependency,explanation,1500,none,15,15,0,993,1215,1215,1215,30,7,5,1254,189,1443,81.0,3268.17,5.0,4.0,5.0,4.0,4.5,True,True,True,True,False
+Where could JWT verification fail and what code is involved?,debugging,code_navigation,1500,none,13,13,0,873,1068,1068,1068,30,11,5,1112,286,1398,71.2,3218.71,4.0,4.0,5.0,4.0,4.25,True,True,True,True,False
+Why was RS256 chosen for authentication?,architecture,explanation,1500,none,15,15,0,988,1248,1248,1248,30,8,5,1303,106,1409,83.2,1736.62,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+What modules import models.py?,structural,explanation,2500,none,15,15,0,865,1161,1161,1161,30,6,5,1200,304,1504,46.44,3577.53,2.0,2.0,3.0,2.0,2.25,True,False,True,True,False
+How does authentication work with JWT?,implementation,explanation,2500,none,15,15,0,1058,1262,1262,1262,30,7,5,1311,382,1693,50.48,4082.84,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+Which components call the authentication service?,dependency,explanation,2500,none,15,15,0,993,1215,1215,1215,30,7,5,1254,189,1443,48.6,2985.21,5.0,4.0,5.0,4.0,4.5,True,True,True,True,False
+Where could JWT verification fail and what code is involved?,debugging,code_navigation,2500,none,13,13,0,873,1068,1068,1068,30,11,5,1112,273,1385,42.72,3266.86,4.0,3.0,4.0,3.0,3.5,True,True,True,True,False
+Why was RS256 chosen for authentication?,architecture,explanation,2500,none,15,15,0,988,1248,1248,1248,30,8,5,1303,106,1409,49.92,2117.53,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+What modules import models.py?,structural,explanation,4000,none,15,15,0,865,1161,1161,1161,30,6,5,1200,307,1507,29.03,4378.5,2.0,2.0,3.0,2.0,2.25,True,False,True,True,False
+How does authentication work with JWT?,implementation,explanation,4000,none,15,15,0,1058,1262,1262,1262,30,7,5,1311,369,1680,31.55,3967.71,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+Which components call the authentication service?,dependency,explanation,4000,none,15,15,0,993,1215,1215,1215,30,7,5,1254,189,1443,30.38,2932.34,5.0,4.0,5.0,4.0,4.5,True,True,True,True,False
+Where could JWT verification fail and what code is involved?,debugging,code_navigation,4000,none,13,13,0,873,1068,1068,1068,30,11,5,1112,218,1330,26.7,2806.31,4.0,3.0,4.0,3.0,3.5,True,True,True,True,False
+Why was RS256 chosen for authentication?,architecture,explanation,4000,none,15,15,0,988,1248,1248,1248,30,8,5,1303,105,1408,31.2,2041.73,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+What modules import models.py?,structural,explanation,unbounded,none,15,15,0,866,1161,1161,1161,30,6,5,1200,304,1504,N/A,5076.48,2.0,2.0,3.0,1.0,2.0,True,False,True,True,False
+How does authentication work with JWT?,implementation,explanation,unbounded,none,15,15,0,1059,1262,1262,1262,30,7,5,1311,353,1664,N/A,4048.16,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+Which components call the authentication service?,dependency,explanation,unbounded,none,15,15,0,993,1215,1215,1215,30,7,5,1254,194,1448,N/A,2773.56,4.0,3.0,5.0,3.0,3.75,True,True,True,True,False
+Where could JWT verification fail and what code is involved?,debugging,code_navigation,unbounded,none,13,13,0,873,1068,1068,1068,30,11,5,1112,236,1348,N/A,3896.85,4.0,3.0,4.0,3.0,3.5,True,True,True,True,False
+Why was RS256 chosen for authentication?,architecture,explanation,unbounded,none,15,15,0,988,1248,1248,1248,30,8,5,1303,103,1406,N/A,2148.06,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+What modules import models.py?,structural,explanation,500,llm,15,8,7,305,485,485,485,30,6,5,531,104,635,97.0,12106.23,1.0,1.0,2.0,1.0,1.25,True,False,True,True,False
+How does authentication work with JWT?,implementation,explanation,500,llm,15,7,8,345,480,480,480,30,7,5,530,392,922,96.0,13570.31,5.0,5.0,5.0,5.0,5.0,True,False,True,True,False
+Which components call the authentication service?,dependency,explanation,500,llm,15,7,8,308,486,486,486,30,7,5,532,113,645,97.2,8987.46,4.0,3.0,5.0,4.0,4.0,True,True,True,True,False
+Where could JWT verification fail and what code is involved?,debugging,code_navigation,500,llm,13,8,5,320,473,473,473,30,11,5,523,156,679,94.6,7135.59,4.0,3.0,4.0,3.0,3.5,True,False,True,True,False
+Why was RS256 chosen for authentication?,architecture,explanation,500,llm,15,7,8,337,476,476,476,30,8,5,531,119,650,95.2,7361.23,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+What modules import models.py?,structural,explanation,1000,llm,15,15,0,660,997,997,997,30,6,5,1039,428,1467,99.7,14901.99,2.0,2.0,3.0,2.0,2.25,True,False,True,True,False
+How does authentication work with JWT?,implementation,explanation,1000,llm,15,14,1,692,954,954,954,30,7,5,1007,267,1274,95.4,11945.77,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+Which components call the authentication service?,dependency,explanation,1000,llm,15,15,0,729,998,998,998,30,7,5,1040,55,1095,99.8,16383.69,3.0,2.0,4.0,2.0,2.75,True,True,True,True,False
+Where could JWT verification fail and what code is involved?,debugging,code_navigation,1000,llm,13,13,0,759,988,988,988,30,11,5,1038,184,1222,98.8,8888.98,4.0,4.0,5.0,4.0,4.25,True,True,True,True,False
+Why was RS256 chosen for authentication?,architecture,explanation,1000,llm,15,14,1,678,972,972,972,30,8,5,1031,88,1119,97.2,6537.73,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+What modules import models.py?,structural,explanation,1500,llm,15,15,0,969,1487,1487,1487,30,6,5,1529,499,2028,99.13,16164.2,2.0,3.0,4.0,3.0,3.0,True,False,True,True,False
+How does authentication work with JWT?,implementation,explanation,1500,llm,15,15,0,1319,1491,1491,1491,30,7,5,1561,375,1936,99.4,13782.04,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+Which components call the authentication service?,dependency,explanation,1500,llm,15,15,0,1235,1475,1475,1475,30,7,5,1530,196,1726,98.33,15356.35,4.0,3.0,5.0,3.0,3.75,True,True,True,True,False
+Where could JWT verification fail and what code is involved?,debugging,code_navigation,1500,llm,13,13,0,1125,1307,1307,1307,30,11,5,1367,321,1688,87.13,9741.17,5.0,5.0,5.0,5.0,5.0,True,True,True,True,False
+Why was RS256 chosen for authentication?,architecture,explanation,1500,llm,15,15,0,1095,1318,1318,1318,30,8,5,1388,184,1572,87.87,8355.61,5.0,4.0,5.0,4.0,4.5,True,True,True,True,False

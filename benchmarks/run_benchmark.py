@@ -126,7 +126,8 @@ def main():
     parser = argparse.ArgumentParser(description="Run Graphify vs Synapse Token Benchmark")
     parser.add_argument("--budget", type=int, default=1500, help="Context token budget (default: 1500)")
     parser.add_argument("--use-mock-llm", action="store_true", help="Force mock LLM instead of real OpenAI API")
-    parser.add_argument("--repetitions", type=int, default=1, help="Number of repetitions per query")
+    parser.add_argument("--repetitions", type=int, default=3, help="Number of repetitions per query (default: 3)")
+    parser.add_argument("--output-prefix", default="final_baseline_tc1", help="Prefix for exported results")
     args = parser.parse_args()
 
     print("================================================================================")
@@ -134,6 +135,7 @@ def main():
     print("================================================================================")
     print(f"Repository Root: {repo_root}")
     print(f"Context Budget:  {args.budget} tokens")
+    print(f"Repetitions:     {args.repetitions} per query")
 
     # Select LLM Provider
     api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("LLM_API_KEY")
@@ -160,9 +162,10 @@ def main():
     harness = TokenBenchmarkHarness(
         graphify_runner=graphify_runner,
         synapse_runner=synapse_runner,
+        llm_client=llm_client,
     )
 
-    print(f"\n--> Executing benchmark across {len(TARGET_QUERIES)} target queries...")
+    print(f"\n--> Executing benchmark across {len(TARGET_QUERIES)} target queries (repetitions: {args.repetitions})...")
     reports = harness.run_suite(
         test_queries=TARGET_QUERIES,
         context_budget=args.budget,
@@ -193,12 +196,15 @@ def main():
     print(f"AVERAGE ABSOLUTE TOKENS SAVED:   {agg.get('average_input_token_reduction', 0)} tokens / query")
     print(f"AVERAGE GRAPHIFY LATENCY:        {agg.get('average_graphify_latency_ms', 0)} ms")
     print(f"AVERAGE SYNAPSE LATENCY:         {agg.get('average_synapse_latency_ms', 0)} ms")
+    print(f"AVERAGE GRAPHIFY QUALITY:        {agg.get('average_graphify_quality', 0)} / 5.0")
+    print(f"AVERAGE SYNAPSE QUALITY:         {agg.get('average_synapse_quality', 0)} / 5.0")
     print("=" * 95)
 
     # Export Results
-    json_path = repo_root / "benchmarks" / "results" / "benchmark_results.json"
-    csv_path = repo_root / "benchmarks" / "results" / "benchmark_results.csv"
-    md_path = repo_root / "docs" / "experiments" / "test_case_1_token_benchmark.md"
+    prefix = args.output_prefix
+    json_path = repo_root / "benchmarks" / "results" / f"{prefix}_results.json"
+    csv_path = repo_root / "benchmarks" / "results" / f"{prefix}_results.csv"
+    md_path = repo_root / "docs" / "experiments" / f"test_case_1_{prefix}.md"
 
     export_json(reports, json_path)
     export_csv(reports, csv_path)

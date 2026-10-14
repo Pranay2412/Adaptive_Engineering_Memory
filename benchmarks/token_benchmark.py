@@ -78,7 +78,13 @@ def count_tokens_precise(text: str) -> int:
 class BaseBenchmarkLLM:
     """Abstract interface for benchmark LLM execution."""
 
-    def invoke(self, prompt: str, max_tokens: int = 500) -> dict[str, Any]:
+    def invoke(
+        self,
+        prompt: str,
+        max_tokens: int = 500,
+        system_prompt: str | None = None,
+        json_mode: bool = False,
+    ) -> dict[str, Any]:
         """Invoke LLM and return text and provider-reported usage."""
         raise NotImplementedError
 
@@ -95,16 +101,29 @@ class OpenAIBenchmarkLLM(BaseBenchmarkLLM):
         self.model = model
         self.temperature = temperature
 
-    def invoke(self, prompt: str, max_tokens: int = 500) -> dict[str, Any]:
+    def invoke(
+        self,
+        prompt: str,
+        max_tokens: int = 500,
+        system_prompt: str | None = None,
+        json_mode: bool = False,
+    ) -> dict[str, Any]:
         start = time.perf_counter()
-        resp = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "user", "content": prompt},
-            ],
-            temperature=self.temperature,
-            max_tokens=max_tokens,
-        )
+        messages: list[dict[str, str]] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+            "max_tokens": max_tokens,
+        }
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+
+        resp = self.client.chat.completions.create(**kwargs)
         latency_ms = (time.perf_counter() - start) * 1000.0
         content = resp.choices[0].message.content or ""
         usage = resp.usage
@@ -122,19 +141,35 @@ class MockBenchmarkLLM(BaseBenchmarkLLM):
 
     def __init__(self, answer_prefix: str = "Synthesized Engineering Answer") -> None:
         self.answer_prefix = answer_prefix
+        self.model = "mock-llm"
 
-    def invoke(self, prompt: str, max_tokens: int = 500) -> dict[str, Any]:
+    def invoke(
+        self,
+        prompt: str,
+        max_tokens: int = 500,
+        system_prompt: str | None = None,
+        json_mode: bool = False,
+    ) -> dict[str, Any]:
         start = time.perf_counter()
-        # Generate a deterministic response referencing key terms in prompt
-        words = prompt.split()[:20]
-        snippet = " ".join(words)
-        content = (
-            f"[{self.answer_prefix}] Based on the provided context ({snippet}...), "
-            f"the components fulfill the requested behavior according to architecture guidelines."
-        )
+        if json_mode:
+            content = json.dumps({
+                "correctness": 4,
+                "completeness": 4,
+                "relevance": 4,
+                "evidence_sufficiency": 4,
+                "reasoning": "Mock evaluation score.",
+            })
+        else:
+            # Generate a deterministic response referencing key terms in prompt
+            words = prompt.split()[:20]
+            snippet = " ".join(words)
+            content = (
+                f"[{self.answer_prefix}] Based on the provided context ({snippet}...), "
+                f"the components fulfill the requested behavior according to architecture guidelines."
+            )
         latency_ms = (time.perf_counter() - start) * 1000.0
         tokens = count_tokens_precise(content)
-        prompt_tokens = count_tokens_precise(prompt)
+        prompt_tokens = count_tokens_precise((system_prompt or "") + "\n\n" + prompt)
         return {
             "content": content,
             "provider_prompt_tokens": prompt_tokens,
@@ -195,6 +230,10 @@ class WorkflowTokenMetrics:
     aco_token_budget: int = 0
     token_optimization_method: str = ""
 
+    # Quality measurements
+    quality_score: float = 0.0
+    quality_breakdown: dict[str, Any] = field(default_factory=dict)
+
     # Payload & Text
     context_text: str = ""
     answer_text: str = ""
@@ -218,6 +257,14 @@ class ComparisonReport:
     graphify_metrics: WorkflowTokenMetrics  # Code-Resolved Graphify Workflow
     synapse_metrics: WorkflowTokenMetrics   # Complete Synapse Workflow
     scientific_validity_notes: list[str] = field(default_factory=list)
+
+    # Latency distribution across repetitions
+    graphify_latencies: list[float] = field(default_factory=list)
+    synapse_latencies: list[float] = field(default_factory=list)
+    graphify_latency_median_ms: float = 0.0
+    synapse_latency_median_ms: float = 0.0
+    graphify_latency_spread_ms: float = 0.0
+    synapse_latency_spread_ms: float = 0.0
 
     @property
     def absolute_context_token_reduction(self) -> int:
@@ -277,6 +324,10 @@ class ComparisonReport:
             "percentage_input_token_reduction": self.percentage_input_token_reduction,
             "absolute_total_token_reduction": self.absolute_total_token_reduction,
             "percentage_total_token_reduction": self.percentage_total_token_reduction,
+            "graphify_latency_median_ms": self.graphify_latency_median_ms,
+            "synapse_latency_median_ms": self.synapse_latency_median_ms,
+            "graphify_latency_spread_ms": self.graphify_latency_spread_ms,
+            "synapse_latency_spread_ms": self.synapse_latency_spread_ms,
             "scientific_validity_notes": self.scientific_validity_notes,
         }
 
@@ -602,9 +653,16 @@ class TokenBenchmarkHarness:
         self,
         graphify_runner: GraphifyWorkflowRunner | None = None,
         synapse_runner: SynapseWorkflowRunner | None = None,
+        llm_client: BaseBenchmarkLLM | None = None,
     ) -> None:
         self.graphify_runner = graphify_runner or GraphifyWorkflowRunner()
         self.synapse_runner = synapse_runner or SynapseWorkflowRunner()
+        self.llm_client = llm_client or getattr(self.synapse_runner, "llm_client", None)
+        try:
+            from benchmarks.budget_benchmark import AnswerQualityJudge
+            self.judge = AnswerQualityJudge(llm_client=self.llm_client)
+        except Exception:
+            self.judge = None
 
     def compare(
         self,
@@ -638,6 +696,22 @@ class TokenBenchmarkHarness:
             memories=memories,
         )
 
+        # Evaluate answer quality with the same calibrated judge
+        if self.judge is not None:
+            try:
+                score_g = self.judge.evaluate(query, m_graphify.answer_text)
+                m_graphify.quality_score = score_g.overall_score
+                m_graphify.quality_breakdown = score_g.to_dict()
+            except Exception as e:
+                logger.warning("Failed to score Graphify answer: %s", e)
+
+            try:
+                score_s = self.judge.evaluate(query, m_synapse.answer_text)
+                m_synapse.quality_score = score_s.overall_score
+                m_synapse.quality_breakdown = score_s.to_dict()
+            except Exception as e:
+                logger.warning("Failed to score Synapse answer: %s", e)
+
         notes = [
             "Graphify runs keyword matching + BFS and resolves raw code snippets at node line numbers.",
             "Synapse applies intent classification, 8-signal ranking, and multi-tier utility-density compaction.",
@@ -667,9 +741,13 @@ class TokenBenchmarkHarness:
         repetitions: int = 1,
     ) -> list[ComparisonReport]:
         """Run the benchmark suite across multiple queries and repetitions."""
+        import statistics
+
         reports: list[ComparisonReport] = []
         for query, category in test_queries:
             query_reports: list[ComparisonReport] = []
+            g_lats: list[float] = []
+            s_lats: list[float] = []
             for _ in range(repetitions):
                 rep = self.compare(
                     query=query,
@@ -683,8 +761,18 @@ class TokenBenchmarkHarness:
                     repo_root=repo_root,
                 )
                 query_reports.append(rep)
-            # Store the representative or averaged report
-            reports.append(query_reports[0])
+                g_lats.append(rep.graphify_metrics.total_latency_ms)
+                s_lats.append(rep.synapse_metrics.total_latency_ms)
+
+            best_rep = query_reports[0]
+            best_rep.graphify_latencies = g_lats
+            best_rep.synapse_latencies = s_lats
+            best_rep.graphify_latency_median_ms = round(statistics.median(g_lats), 2)
+            best_rep.synapse_latency_median_ms = round(statistics.median(s_lats), 2)
+            best_rep.graphify_latency_spread_ms = round(max(g_lats) - min(g_lats), 2)
+            best_rep.synapse_latency_spread_ms = round(max(s_lats) - min(s_lats), 2)
+
+            reports.append(best_rep)
         return reports
 
 
@@ -719,6 +807,9 @@ def calculate_aggregates(reports: list[ComparisonReport]) -> dict[str, Any]:
     avg_g_latency = sum(r.graphify_metrics.total_latency_ms for r in reports) / len(reports)
     avg_s_latency = sum(r.synapse_metrics.total_latency_ms for r in reports) / len(reports)
 
+    avg_g_quality = sum(r.graphify_metrics.quality_score for r in reports) / len(reports)
+    avg_s_quality = sum(r.synapse_metrics.quality_score for r in reports) / len(reports)
+
     return {
         "num_queries": len(reports),
         "total_graphify_context_tokens": total_g_ctx,
@@ -738,6 +829,8 @@ def calculate_aggregates(reports: list[ComparisonReport]) -> dict[str, Any]:
         "percentage_total_token_reduction": round(pct_tot_reduction, 2),
         "average_graphify_latency_ms": round(avg_g_latency, 2),
         "average_synapse_latency_ms": round(avg_s_latency, 2),
+        "average_graphify_quality": round(avg_g_quality, 2),
+        "average_synapse_quality": round(avg_s_quality, 2),
     }
 
 
@@ -773,6 +866,12 @@ def export_csv(reports: list[ComparisonReport], file_path: Path | str) -> None:
             "Total_Reduction_%",
             "Graphify_Latency_ms",
             "Synapse_Latency_ms",
+            "Graphify_Latency_Median_ms",
+            "Synapse_Latency_Median_ms",
+            "Graphify_Latency_Spread_ms",
+            "Synapse_Latency_Spread_ms",
+            "Graphify_Quality",
+            "Synapse_Quality",
             "Graphify_Has_Code",
             "Synapse_Has_Code",
             "Synapse_Has_Docs",
@@ -797,6 +896,12 @@ def export_csv(reports: list[ComparisonReport], file_path: Path | str) -> None:
                 r.percentage_total_token_reduction,
                 r.graphify_metrics.total_latency_ms,
                 r.synapse_metrics.total_latency_ms,
+                r.graphify_latency_median_ms,
+                r.synapse_latency_median_ms,
+                r.graphify_latency_spread_ms,
+                r.synapse_latency_spread_ms,
+                r.graphify_metrics.quality_score,
+                r.synapse_metrics.quality_score,
                 r.graphify_metrics.has_code_content,
                 r.synapse_metrics.has_code_content,
                 r.synapse_metrics.has_documentation,
@@ -819,6 +924,8 @@ def export_markdown_report(reports: list[ComparisonReport], file_path: Path | st
         f"- **Average Input Token Reduction**: **{agg.get('percentage_input_token_reduction', 0)}%**",
         f"- **Average Context Token Reduction**: **{agg.get('percentage_context_token_reduction', 0)}%**",
         f"- **Average Absolute Tokens Saved**: **{agg.get('average_input_token_reduction', 0)} tokens** per query.",
+        f"- **Average Graphify Answer Quality**: **{agg.get('average_graphify_quality', 0)} / 5.0**",
+        f"- **Average Synapse Answer Quality**: **{agg.get('average_synapse_quality', 0)} / 5.0**",
         "",
         "## 2. Token Reduction by Query",
         "",
@@ -833,10 +940,10 @@ def export_markdown_report(reports: list[ComparisonReport], file_path: Path | st
 
     lines.extend([
         "",
-        "## 3. Comprehensive Token Breakdown",
+        "## 3. Comprehensive Token & Quality Breakdown",
         "",
-        "| Query | Graphify Context | Synapse Context | Graphify Total | Synapse Total | Total Reduction % |",
-        "| :--- | :--- | :--- | :--- | :--- | :--- |",
+        "| Query | Graphify Context | Synapse Context | Graphify Total | Synapse Total | Graphify Quality | Synapse Quality |",
+        "| :--- | :---: | :---: | :---: | :---: | :---: | :---: |",
     ])
 
     for r in reports:
@@ -844,23 +951,26 @@ def export_markdown_report(reports: list[ComparisonReport], file_path: Path | st
         s_tot = r.synapse_metrics.provider_total_tokens or r.synapse_metrics.total_tokens
         lines.append(
             f"| {r.query} | {r.graphify_metrics.context_tokens} | {r.synapse_metrics.context_tokens} | "
-            f"{g_tot} | {s_tot} | **{r.percentage_total_token_reduction}%** |"
+            f"{g_tot} | {s_tot} | {r.graphify_metrics.quality_score:.2f} | **{r.synapse_metrics.quality_score:.2f}** |"
         )
 
     lines.extend([
         "",
-        "## 4. Latency & Information Parity Analysis",
+        "## 4. Latency Distribution & Overhead Analysis",
         "",
-        "| Query | Graphify Latency (ms) | Synapse Latency (ms) | Graphify Modality | Synapse Modality |",
-        "| :--- | :--- | :--- | :--- | :--- |",
+        "> [!IMPORTANT]",
+        "> **Latency Overhead Disclosure**: Synapse significantly reduces token usage, but introduces higher retrieval latency compared to raw Graphify BFS. This is due to multi-source hybrid retrieval (BM25 + vector matching), intent classification, 8-signal ranking, and multi-tier utility-density compaction.",
+        "",
+        "| Query | Graphify Median (ms) | Graphify Spread (ms) | Synapse Median (ms) | Synapse Spread (ms) | Latency Delta |",
+        "| :--- | :---: | :---: | :---: | :---: | :---: |",
     ])
 
     for r in reports:
-        g_mod = "Code Snippets" if r.graphify_metrics.has_code_content else "Topology Only"
-        s_mod = "Code + Docs + ADRs" if (r.synapse_metrics.has_documentation and r.synapse_metrics.has_team_decisions) else "Code + Docs"
+        g_med = r.graphify_latency_median_ms if r.graphify_latency_median_ms > 0 else r.graphify_metrics.total_latency_ms
+        s_med = r.synapse_latency_median_ms if r.synapse_latency_median_ms > 0 else r.synapse_metrics.total_latency_ms
+        delta = s_med - g_med
         lines.append(
-            f"| {r.query} | {r.graphify_metrics.total_latency_ms} ms | {r.synapse_metrics.total_latency_ms} ms | "
-            f"{g_mod} | **{s_mod}** |"
+            f"| {r.query} | {g_med} ms | ±{r.graphify_latency_spread_ms} ms | {s_med} ms | ±{r.synapse_latency_spread_ms} ms | +{delta:.1f} ms |"
         )
 
     lines.extend([
@@ -872,11 +982,14 @@ def export_markdown_report(reports: list[ComparisonReport], file_path: Path | st
         f"- **Mean Input Reduction Ratio**: **{agg.get('percentage_input_token_reduction', 0)}%**",
         f"- **Mean Context Reduction Ratio**: **{agg.get('percentage_context_token_reduction', 0)}%**",
         f"- **Mean Total Reduction Ratio**: **{agg.get('percentage_total_token_reduction', 0)}%**",
+        f"- **Mean Graphify Latency**: {agg.get('average_graphify_latency_ms', 0):.1f} ms",
+        f"- **Mean Synapse Latency**: {agg.get('average_synapse_latency_ms', 0):.1f} ms (Overhead: +{agg.get('average_synapse_latency_ms', 0) - agg.get('average_graphify_latency_ms', 0):.1f} ms)",
         "",
         "## 6. Methodology & Scientific Parity",
         "1. **Code-Resolved Parity**: Graphify was executed in `code_resolved` mode, extracting full code snippets from node file/line coordinates rather than raw ASCII labels. This ensures both workflows provide the LLM with sufficient source code to answer implementation questions.",
         "2. **Identical Scaffolding**: Both workflows shared the exact same system prompt template, context budget (1,500 tokens), user query strings, and LLM configuration.",
         "3. **Token Counting**: Measured using `tiktoken` (`cl100k_base`) preflight tokenizer counting and validated against provider-reported API usage.",
+        "4. **Quality Evaluation**: Both workflows were evaluated on the identical calibrated reference-based and LLM rubric across a 1.0–5.0 scale without artificial floors.",
     ])
 
     p.write_text("\n".join(lines), encoding="utf-8")

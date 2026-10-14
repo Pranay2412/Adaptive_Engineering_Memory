@@ -180,13 +180,19 @@ class AnswerQualityJudge:
         # If LLM client is available and is live OpenAIBenchmarkLLM, invoke LLM-as-judge
         if self.llm_client and isinstance(self.llm_client, OpenAIBenchmarkLLM):
             try:
-                judge_prompt = (
+                judge_user_prompt = (
                     f"User Query: {query}\n\n"
                     f"Ground Truth Expectations & Key Facts: {', '.join(key_facts)}\n"
                     f"Rationale: {ref.get('rationale', '')}\n\n"
-                    f"Generated Answer to Evaluate:\n{answer}"
+                    f"Generated Answer to Evaluate:\n{answer}\n\n"
+                    f"Output strictly valid JSON according to the schema in the system prompt."
                 )
-                raw_res = self.llm_client.invoke(judge_prompt, max_tokens=300)
+                raw_res = self.llm_client.invoke(
+                    judge_user_prompt,
+                    max_tokens=300,
+                    system_prompt=self.JUDGE_SYSTEM_PROMPT,
+                    json_mode=True,
+                )
                 content = raw_res.get("content", "").strip()
 
                 # Clean markdown fencing if present
@@ -210,13 +216,13 @@ class AnswerQualityJudge:
                     reasoning=str(data.get("reasoning", "")),
                 )
             except Exception as ex:
-                logger.warning("LLM judge failed (%s), using deterministic rubric: %s", ex, answer[:80])
+                logger.warning("LLM judge failed (%s), using calibrated deterministic rubric: %s", ex, answer[:80])
 
         # Deterministic / reference-based fallback rubric
         return self._deterministic_evaluate(query, answer, key_facts)
 
     def _deterministic_evaluate(self, query: str, answer: str, key_facts: list[str]) -> AnswerQualityScore:
-        """Deterministic rubric matching key facts and disclaimer detection."""
+        """Deterministic rubric matching key facts and disclaimer detection across a true 1-5 scale."""
         ans_lower = answer.lower()
 
         # Check for evasive disclaimer ("does not contain", "cannot determine")
@@ -228,16 +234,17 @@ class AnswerQualityJudge:
                 "cannot provide an answer",
                 "no information",
                 "cannot be determined",
+                "context does not explicitly",
             ]
         )
 
         if is_disclaimer:
             return AnswerQualityScore(
-                correctness=4.0,  # Truthful about lack of context
+                correctness=3.5,  # Truthful about lack of context
                 completeness=1.5,
-                relevance=2.5,
+                relevance=2.0,
                 evidence_sufficiency=1.0,
-                overall_score=2.25,
+                overall_score=2.0,
                 judge_model="deterministic_rubric",
                 reasoning="Answer stated context lacked necessary information.",
             )
@@ -246,10 +253,11 @@ class AnswerQualityJudge:
         matches = sum(1 for fact in key_facts if any(term.lower() in ans_lower for term in fact.split() if len(term) > 3))
         fact_ratio = matches / max(1, len(key_facts))
 
-        correctness = round(3.0 + min(2.0, fact_ratio * 2.0), 2)
-        completeness = round(2.0 + min(3.0, fact_ratio * 3.0), 2)
-        relevance = 4.5 if len(answer) > 50 else 3.0
-        evidence_sufficiency = round(2.0 + min(3.0, (ans_lower.count("`") // 4) * 0.5 + fact_ratio * 2.0), 2)
+        # Calibrated 1.0 - 5.0 scoring without artificial floor
+        correctness = round(1.0 + fact_ratio * 4.0, 2)
+        completeness = round(1.0 + fact_ratio * 4.0, 2)
+        relevance = 4.5 if (len(answer) > 50 and matches > 0) else (2.0 if len(answer) > 50 else 1.0)
+        evidence_sufficiency = round(1.0 + min(4.0, (ans_lower.count("`") // 4) * 0.5 + fact_ratio * 3.5), 2)
         overall = round((correctness + completeness + relevance + evidence_sufficiency) / 4.0, 2)
 
         return AnswerQualityScore(
@@ -290,8 +298,10 @@ class BudgetTrialMetric:
     final_context_tokens: int = 0          # Authoritative context token count
 
     # LLM token measurements
+    knowledge_context_tokens: int = 0      # Explicit synonym for final_context_tokens
     system_prompt_tokens: int = 0
     user_query_tokens: int = 0
+    other_prompt_tokens: int = 0           # Formatting, separators, section headers
     actual_provider_prompt_tokens: int = 0
     output_completion_tokens: int = 0
     total_tokens: int = 0
@@ -320,6 +330,7 @@ class BudgetTrialMetric:
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
+        d["knowledge_context_tokens"] = self.final_context_tokens
         d["quality_score"] = self.quality_score.to_dict()
         return d
 
@@ -408,7 +419,10 @@ class BudgetExperimentRunner:
         deduped = deduplicate_results(ranked_candidates)
 
         # 3. Context Selection & Token Optimization
-        token_optimizer = TokenOptimizationEngine(llm_compressor=self.llm_compressor)
+        token_optimizer = TokenOptimizationEngine(
+            llm_compressor=self.llm_compressor,
+            tokenizer=count_tokens_precise,
+        )
 
         # Select packer according to optimization mode
         effective_budget = budget if budget is not None else 100000
@@ -421,6 +435,7 @@ class BudgetExperimentRunner:
                 max_token_budget=effective_budget,
                 intent_result=intent_res,
                 mode=OptimizationMode.NONE,
+                tokenizer=count_tokens_precise,
             )
             context_text = opt_res.optimized_context
         elif norm_mode == OptimizationMode.DETERMINISTIC:
@@ -431,6 +446,7 @@ class BudgetExperimentRunner:
                 max_token_budget=effective_budget,
                 intent_result=intent_res,
                 mode=OptimizationMode.DETERMINISTIC,
+                tokenizer=count_tokens_precise,
             )
             context_text = opt_res.optimized_context
         elif norm_mode == OptimizationMode.LLM:
@@ -442,10 +458,11 @@ class BudgetExperimentRunner:
                 intent_result=intent_res,
                 mode=OptimizationMode.LLM,
                 llm_compressor=self.llm_compressor,
+                tokenizer=count_tokens_precise,
             )
             context_text = opt_res.optimized_context
         else:
-            packer = AdaptiveContextPacker()
+            packer = AdaptiveContextPacker(tokenizer=count_tokens_precise)
             context_text, _ = packer.pack(deduped, intent_res, token_budget=budget)
             opt_res = None
 
@@ -462,11 +479,17 @@ class BudgetExperimentRunner:
             removed_count = len(opt_res.items_removed)
             tokens_saved = opt_res.tokens_saved
             percentage_reduction = opt_res.percentage_reduction
+            retained_items = opt_res.items_retained
         else:
             retained_count = len(deduped)
             removed_count = 0
             tokens_saved = 0
             percentage_reduction = 0.0
+            retained_items = [
+                it for it in deduped
+                if (it.entity and it.entity.lower() in context_text.lower())
+                or (it.content and it.content[:30].lower() in context_text.lower())
+            ]
 
         # Budget utilization percentage
         if budget is not None and budget > 0:
@@ -474,12 +497,45 @@ class BudgetExperimentRunner:
         else:
             budget_utilization = None  # N/A for unbounded
 
-        # Modality checks
-        has_code = bool(symbols or any(r.source == "code" for r in deduped))
-        has_docs = bool(entities or any(r.source == "documentation" for r in deduped))
-        has_mem = bool(memories or any(r.source in ("team_memory", "session_memory") for r in deduped))
-        has_arch = has_docs or has_mem or any("architecture" in r.type.lower() or "decision" in r.type.lower() for r in deduped)
-        has_graph = any(bool(r.relationship_path) for r in deduped)
+        # Modality checks strictly inspecting what was retained in the packed context
+        def _get_val(it: Any, key: str) -> str:
+            if isinstance(it, dict):
+                return str(it.get(key) or "")
+            return str(getattr(it, key, "") or "")
+
+        has_code = any(
+            _get_val(r, "source").lower() == "code"
+            or "codesymbol" in _get_val(r, "type").lower()
+            or _get_val(r, "file_or_document").endswith((".py", ".ts", ".js", ".go", ".java", ".rs"))
+            for r in retained_items
+        )
+        has_docs = any(
+            _get_val(r, "source").lower() == "documentation"
+            or "document" in _get_val(r, "type").lower()
+            or _get_val(r, "file_or_document").endswith((".md", ".rst", ".txt"))
+            for r in retained_items
+        )
+        has_mem = any(
+            _get_val(r, "source").lower() in ("team_memory", "session_memory")
+            or _get_val(r, "type").lower().startswith("memory")
+            or "memory" in _get_val(r, "file_or_document").lower()
+            for r in retained_items
+        )
+        has_arch = (
+            has_docs
+            or has_mem
+            or any(
+                "architecture" in _get_val(r, "type").lower()
+                or "decision" in _get_val(r, "type").lower()
+                or "adr" in _get_val(r, "file_or_document").lower()
+                or "adr" in _get_val(r, "entity").lower()
+                for r in retained_items
+            )
+        )
+        has_graph = any(
+            bool(r.get("relationship_path")) if isinstance(r, dict) else bool(getattr(r, "relationship_path", None))
+            for r in retained_items
+        )
 
         # 4. LLM Prompt Assembly & Execution
         system_tok = count_tokens_precise(self.system_prompt)
@@ -489,6 +545,8 @@ class BudgetExperimentRunner:
             f"Context:\n{context_text}\n\n"
             f"User Query:\n{query}"
         )
+        total_prompt_tok = count_tokens_precise(full_prompt)
+        other_prompt_tok = max(0, total_prompt_tok - (system_tok + query_tok + final_context_tokens))
 
         llm_res = self.llm_client.invoke(full_prompt)
         answer_text = llm_res.get("content", "")
@@ -500,7 +558,7 @@ class BudgetExperimentRunner:
         prov_total = llm_res.get("provider_total_tokens")
 
         if prov_prompt is None:
-            prov_prompt = count_tokens_precise(full_prompt)
+            prov_prompt = total_prompt_tok
         if prov_comp is None:
             prov_comp = count_tokens_precise(answer_text)
         if prov_total is None:
@@ -523,8 +581,10 @@ class BudgetExperimentRunner:
             estimated_context_tokens=estimated_context_tokens,
             precise_tiktoken_context_tokens=precise_tiktoken_ctx,
             final_context_tokens=final_context_tokens,
+            knowledge_context_tokens=final_context_tokens,
             system_prompt_tokens=system_tok,
             user_query_tokens=query_tok,
+            other_prompt_tokens=other_prompt_tok,
             actual_provider_prompt_tokens=prov_prompt,
             output_completion_tokens=prov_comp,
             total_tokens=prov_total,
@@ -563,6 +623,9 @@ def compute_budget_aggregates(trials: list[BudgetTrialMetric]) -> dict[str, Any]
     for b_key, b_trials in by_budget.items():
         n = len(b_trials)
         avg_ctx = sum(t.final_context_tokens for t in b_trials) / n
+        avg_sys = sum(t.system_prompt_tokens for t in b_trials) / n
+        avg_query = sum(t.user_query_tokens for t in b_trials) / n
+        avg_other = sum(t.other_prompt_tokens for t in b_trials) / n
         avg_prompt = sum(t.actual_provider_prompt_tokens for t in b_trials) / n
         avg_comp = sum(t.output_completion_tokens for t in b_trials) / n
         avg_total = sum(t.total_tokens for t in b_trials) / n
@@ -576,6 +639,9 @@ def compute_budget_aggregates(trials: list[BudgetTrialMetric]) -> dict[str, Any]
             "budget": b_key,
             "num_trials": n,
             "avg_context_tokens": round(avg_ctx, 1),
+            "avg_system_prompt_tokens": round(avg_sys, 1),
+            "avg_user_query_tokens": round(avg_query, 1),
+            "avg_other_prompt_tokens": round(avg_other, 1),
             "avg_input_prompt_tokens": round(avg_prompt, 1),
             "avg_completion_tokens": round(avg_comp, 1),
             "avg_total_tokens": round(avg_total, 1),
@@ -586,6 +652,7 @@ def compute_budget_aggregates(trials: list[BudgetTrialMetric]) -> dict[str, Any]
             "has_docs_pct": round(sum(1 for t in b_trials if t.has_documentation) / n * 100, 1),
             "has_arch_pct": round(sum(1 for t in b_trials if t.has_architecture_information) / n * 100, 1),
             "has_decisions_pct": round(sum(1 for t in b_trials if t.has_team_decisions) / n * 100, 1),
+            "has_graph_pct": round(sum(1 for t in b_trials if t.has_graph_relationships) / n * 100, 1),
         })
 
     return {
@@ -605,6 +672,7 @@ def export_budget_csv(trials: list[BudgetTrialMetric], output_path: Path) -> Non
         "query", "category", "intent", "budget", "optimization_mode",
         "raw_candidate_count", "retained_candidate_count", "removed_candidate_count",
         "estimated_context_tokens", "precise_tiktoken_context_tokens", "final_context_tokens",
+        "knowledge_context_tokens", "system_prompt_tokens", "user_query_tokens", "other_prompt_tokens",
         "actual_provider_prompt_tokens", "output_completion_tokens", "total_tokens",
         "budget_utilization_pct", "total_latency_ms",
         "correctness", "completeness", "relevance", "evidence_sufficiency", "overall_quality",
@@ -626,6 +694,10 @@ def export_budget_csv(trials: list[BudgetTrialMetric], output_path: Path) -> Non
                 t.estimated_context_tokens,
                 t.precise_tiktoken_context_tokens,
                 t.final_context_tokens,
+                t.knowledge_context_tokens,
+                t.system_prompt_tokens,
+                t.user_query_tokens,
+                t.other_prompt_tokens,
                 t.actual_provider_prompt_tokens,
                 t.output_completion_tokens,
                 t.total_tokens,
@@ -645,7 +717,7 @@ def export_budget_csv(trials: list[BudgetTrialMetric], output_path: Path) -> Non
 
 
 def export_budget_markdown(report: dict[str, Any], output_path: Path) -> None:
-    """Generate Markdown report for TEST CASE 2."""
+    """Generate Markdown report for TEST CASE 2 with separate token categories."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     summaries = report.get("aggregates", {}).get("by_budget", [])
 
@@ -657,18 +729,20 @@ def export_budget_markdown(report: dict[str, Any], output_path: Path) -> None:
         f"- **Budgets Evaluated**: `500`, `1000`, `1500`, `2500`, `4000`, and `unbounded` (None)",
         f"- **Total Experimental Trials**: {report.get('aggregates', {}).get('total_trials', 0)}",
         f"- **Evaluation Model**: `{report.get('metadata', {}).get('model', 'gpt-4o-mini')}`",
+        f"- **Tokenizer**: `{report.get('metadata', {}).get('tokenizer', 'tiktoken (cl100k_base)')}`",
         f"- **Timestamp**: `{report.get('timestamp', '')}`",
         "",
-        "## 2. Aggregate Results by Budget Configuration",
+        "## 2. Token Accounting Breakdown by Budget Configuration",
         "",
-        "| Budget | Avg Context Tokens | Avg Input / Prompt Tokens | Avg Total Tokens | Budget Utilization % | Avg Latency (ms) | Answer Quality (1-5) |",
-        "| :--- | :---: | :---: | :---: | :---: | :---: | :---: |",
+        "| Budget | Avg Knowledge Context Tokens | Avg User Query Tokens | Avg System/Other Tokens | Avg Input / Prompt Tokens | Avg Total Tokens | Budget Utilization % | Avg Latency (ms) | Answer Quality (1-5) |",
+        "| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
     ]
 
     for s in summaries:
         b_str = str(s["budget"])
+        avg_sys_other = round(s.get("avg_system_prompt_tokens", 0) + s.get("avg_other_prompt_tokens", 0), 1)
         lines.append(
-            f"| **{b_str}** | {s['avg_context_tokens']} | {s['avg_input_prompt_tokens']} | {s['avg_total_tokens']} | {s['avg_budget_utilization_pct']}% | {s['avg_latency_ms']} ms | **{s['avg_quality_score']} / 5.0** |"
+            f"| **{b_str}** | {s['avg_context_tokens']} | {s.get('avg_user_query_tokens', 'N/A')} | {avg_sys_other} | {s['avg_input_prompt_tokens']} | {s['avg_total_tokens']} | {s['avg_budget_utilization_pct']}% | {s['avg_latency_ms']} ms | **{s['avg_quality_score']} / 5.0** |"
         )
 
     lines.extend([
@@ -681,7 +755,7 @@ def export_budget_markdown(report: dict[str, Any], output_path: Path) -> None:
 
     for s in summaries:
         lines.append(
-            f"| **{s['budget']}** | {s['has_code_pct']}% | {s['has_docs_pct']}% | {s['has_decisions_pct']}% | 100.0% |"
+            f"| **{s['budget']}** | {s['has_code_pct']}% | {s['has_docs_pct']}% | {s['has_decisions_pct']}% | {s.get('has_graph_pct', 0.0)}% |"
         )
 
     lines.extend([

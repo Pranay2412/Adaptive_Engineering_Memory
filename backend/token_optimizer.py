@@ -57,7 +57,7 @@ class ContextTier(str, Enum):
 # ---------------------------------------------------------------------------
 
 class TokenEstimator:
-    """Deterministic token estimation utility."""
+    """Deterministic token estimation and precise counting utility."""
 
     @staticmethod
     def estimate_text(text: str) -> int:
@@ -72,11 +72,41 @@ class TokenEstimator:
         word_tokens = int(len(clean.split()) * 1.25)
         return max(1, max(char_tokens, word_tokens))
 
+    @staticmethod
+    def count_tokens(text: str, tokenizer: str | Callable[[str], int] | None = None) -> int:
+        """Count tokens accurately using a specified tokenizer, or fallback to estimate_text."""
+        if not text:
+            return 0
+        if tokenizer is None:
+            return TokenEstimator.estimate_text(text)
+        if callable(tokenizer):
+            return int(tokenizer(text))
+        if str(tokenizer).lower() in ("tiktoken", "cl100k_base"):
+            try:
+                import tiktoken
+
+                enc = tiktoken.get_encoding("cl100k_base")
+                return len(enc.encode(text))
+            except Exception:
+                return TokenEstimator.estimate_text(text)
+        return TokenEstimator.estimate_text(text)
+
     @classmethod
     def estimate_item(cls, item: HybridRetrievalResult, tier: ContextTier = ContextTier.FULL) -> int:
         """Estimate token cost of a candidate item at a given representation tier."""
         rendered = render_candidate_item(item, tier)
         return cls.estimate_text(rendered)
+
+    @classmethod
+    def count_item(
+        cls,
+        item: HybridRetrievalResult,
+        tier: ContextTier = ContextTier.FULL,
+        tokenizer: str | Callable[[str], int] | None = None,
+    ) -> int:
+        """Count token cost of a candidate item using the specified tokenizer."""
+        rendered = render_candidate_item(item, tier)
+        return cls.count_tokens(rendered, tokenizer=tokenizer)
 
 
 # ---------------------------------------------------------------------------
@@ -589,11 +619,18 @@ class TokenOptimizationEngine:
         enable_tier_compaction: bool = True,
         header_budget_allowance: int = 50,
         llm_compressor: BaseLLMCompressor | None = None,
+        tokenizer: str | Callable[[str], int] | None = None,
     ) -> None:
         self.redundancy_detector = RedundancyDetector(jaccard_threshold=jaccard_threshold)
         self.enable_tier_compaction = enable_tier_compaction
         self.header_budget_allowance = header_budget_allowance
         self.llm_compressor = llm_compressor or MockLLMCompressor()
+        self.tokenizer = tokenizer
+
+    def count_tokens(self, text: str, tokenizer: str | Callable[[str], int] | None = None) -> int:
+        """Count tokens using tokenizer override, instance tokenizer, or heuristic fallback."""
+        tok = tokenizer if tokenizer is not None else self.tokenizer
+        return TokenEstimator.count_tokens(text, tokenizer=tok)
 
     def compute_candidate_utility(
         self,
@@ -623,6 +660,7 @@ class TokenOptimizationEngine:
         intent_result: IntentAnalysisResult | None = None,
         mode: OptimizationMode | str = OptimizationMode.DETERMINISTIC,
         llm_compressor: BaseLLMCompressor | None = None,
+        tokenizer: str | Callable[[str], int] | None = None,
     ) -> TokenOptimizationResult:
         """Execute token optimization pipeline across the selected mode.
 
@@ -636,6 +674,8 @@ class TokenOptimizationEngine:
                 norm_mode = OptimizationMode.DETERMINISTIC
         else:
             norm_mode = mode
+
+        active_tok = tokenizer if tokenizer is not None else self.tokenizer
 
         if not ranked_context_items or max_token_budget <= 0:
             return TokenOptimizationResult(
@@ -656,7 +696,7 @@ class TokenOptimizationEngine:
         # -------------------------------------------------------------------
         unoptimized_blocks = [render_candidate_item(it, ContextTier.FULL) for it in ranked_context_items]
         raw_header = f"### Synapse Context (Query: {user_query})\n"
-        original_estimated_tokens = TokenEstimator.estimate_text("\n\n".join([raw_header, *unoptimized_blocks]))
+        original_estimated_tokens = self.count_tokens("\n\n".join([raw_header, *unoptimized_blocks]), active_tok)
 
         intent_label = f" (Intent: {intent_result.primary_intent.value.replace('_', ' ').title()})" if intent_result else ""
         header = f"### Synapse Engineering Memory Context{intent_label}\n> Query: `{user_query.strip()}` | Budget: {max_token_budget} tokens"
@@ -669,7 +709,7 @@ class TokenOptimizationEngine:
 
         for item in ranked_context_items:
             is_redundant, redundancy_reason = self.redundancy_detector.check_redundancy(item, deduped_candidates)
-            full_tokens = TokenEstimator.estimate_item(item, ContextTier.FULL)
+            full_tokens = self.count_tokens(render_candidate_item(item, ContextTier.FULL), active_tok)
             utility = self.compute_candidate_utility(item, user_query)
             if is_redundant:
                 removed_records.append(
@@ -686,24 +726,30 @@ class TokenOptimizationEngine:
                 deduped_candidates.append(item)
 
         # -------------------------------------------------------------------
-        # Step 3: Structured Compression
+        # Step 3: Structured Compression & Strict Knapsack Packing
         # -------------------------------------------------------------------
         accepted_records: list[OptimizedItemRecord] = []
         provenance_audit: dict[str, Any] = {}
 
-        if norm_mode == OptimizationMode.NONE:
-            # Mode 1: No Optimization - Sequential raw full inclusion under budget
+        header_tokens = self.count_tokens(header, active_tok)
+        if header_tokens <= max_token_budget:
             rendered_blocks = [header]
-            used_tokens = TokenEstimator.estimate_text(header)
+        else:
+            rendered_blocks = []
 
+        if norm_mode == OptimizationMode.NONE:
+            # Mode 1: No Optimization - Sequential raw full inclusion under strict budget
             for item in deduped_candidates:
                 full_text = render_candidate_item(item, ContextTier.FULL)
-                cost_full = TokenEstimator.estimate_text(full_text)
+                cost_full = self.count_tokens(full_text, active_tok)
                 utility = self.compute_candidate_utility(item, user_query)
 
-                if used_tokens + cost_full <= max_token_budget:
+                candidate_blocks = rendered_blocks + [full_text]
+                candidate_context = "\n\n".join(candidate_blocks).strip()
+                candidate_tokens = self.count_tokens(candidate_context, active_tok)
+
+                if candidate_tokens <= max_token_budget:
                     rendered_blocks.append(full_text)
-                    used_tokens += cost_full
                     accepted_records.append(
                         OptimizedItemRecord(
                             entity=item.entity,
@@ -717,19 +763,21 @@ class TokenOptimizationEngine:
                         )
                     )
                 else:
+                    curr_tokens = self.count_tokens("\n\n".join(rendered_blocks).strip(), active_tok)
+                    remaining = max(0, max_token_budget - curr_tokens)
                     removed_records.append(
                         RemovedItemRecord(
                             entity=item.entity,
                             type=item.type,
                             file_or_document=item.file_or_document,
-                            reason=f"budget_exceeded: raw item requires {cost_full} tokens, {max_token_budget - used_tokens} left",
+                            reason=f"budget_exceeded: raw item requires {cost_full} tokens, {remaining} left",
                             original_tokens=cost_full,
                             utility=utility,
                         )
                     )
 
             final_context = "\n\n".join(rendered_blocks).strip()
-            final_input_tokens = TokenEstimator.estimate_text(final_context)
+            final_input_tokens = self.count_tokens(final_context, active_tok)
             provenance_audit = {
                 "all_sources_preserved": True,
                 "all_symbols_preserved": True,
@@ -742,62 +790,47 @@ class TokenOptimizationEngine:
             scored_candidates: list[tuple[HybridRetrievalResult, float, int, float]] = []
             for item in deduped_candidates:
                 utility = self.compute_candidate_utility(item, user_query)
-                full_tokens = TokenEstimator.estimate_item(item, ContextTier.FULL)
+                full_tokens = self.count_tokens(render_candidate_item(item, ContextTier.FULL), active_tok)
                 utility_per_token = utility / max(1, full_tokens)
                 scored_candidates.append((item, utility, full_tokens, utility_per_token))
 
             scored_candidates.sort(key=lambda t: t[3], reverse=True)
 
             accepted_items: list[HybridRetrievalResult] = []
-            rendered_blocks = [header]
-            used_tokens = TokenEstimator.estimate_text(header)
             active_graph_hops: list[RelationshipHop] = []
 
             for item, utility, full_tokens, density in scored_candidates:
-                remaining_budget = max_token_budget - used_tokens
-                if remaining_budget <= 5:
-                    removed_records.append(
-                        RemovedItemRecord(
-                            entity=item.entity,
-                            type=item.type,
-                            file_or_document=item.file_or_document,
-                            reason="budget_exceeded: token budget reached",
-                            original_tokens=full_tokens,
-                            utility=utility,
-                        )
-                    )
-                    continue
-
                 selected_tier: ContextTier | None = None
                 selected_text: str = ""
                 selected_tokens: int = 0
 
+                # 1. Try FULL tier
                 full_text = render_candidate_item(item, ContextTier.FULL)
-                cost_full = TokenEstimator.estimate_text(full_text)
-
-                if cost_full <= remaining_budget:
+                cand_blocks_full = rendered_blocks + [full_text]
+                if self.count_tokens("\n\n".join(cand_blocks_full).strip(), active_tok) <= max_token_budget:
                     selected_tier = ContextTier.FULL
                     selected_text = full_text
-                    selected_tokens = cost_full
+                    selected_tokens = self.count_tokens(full_text, active_tok)
                 elif self.enable_tier_compaction:
+                    # 2. Try COMPACT tier
                     compact_text = render_candidate_item(item, ContextTier.COMPACT)
-                    cost_compact = TokenEstimator.estimate_text(compact_text)
-                    if cost_compact <= remaining_budget:
+                    cand_blocks_comp = rendered_blocks + [compact_text]
+                    if self.count_tokens("\n\n".join(cand_blocks_comp).strip(), active_tok) <= max_token_budget:
                         selected_tier = ContextTier.COMPACT
                         selected_text = compact_text
-                        selected_tokens = cost_compact
+                        selected_tokens = self.count_tokens(compact_text, active_tok)
                     else:
+                        # 3. Try MINIMAL tier
                         minimal_text = render_candidate_item(item, ContextTier.MINIMAL)
-                        cost_minimal = TokenEstimator.estimate_text(minimal_text)
-                        if cost_minimal <= remaining_budget:
+                        cand_blocks_min = rendered_blocks + [minimal_text]
+                        if self.count_tokens("\n\n".join(cand_blocks_min).strip(), active_tok) <= max_token_budget:
                             selected_tier = ContextTier.MINIMAL
                             selected_text = minimal_text
-                            selected_tokens = cost_minimal
+                            selected_tokens = self.count_tokens(minimal_text, active_tok)
 
                 if selected_tier is not None:
                     accepted_items.append(item)
                     rendered_blocks.append(selected_text)
-                    used_tokens += selected_tokens
 
                     if item.relationship_path:
                         for h in item.relationship_path:
@@ -821,35 +854,34 @@ class TokenOptimizationEngine:
                         )
                     )
                 else:
+                    curr_tokens = self.count_tokens("\n\n".join(rendered_blocks).strip(), active_tok)
+                    remaining = max(0, max_token_budget - curr_tokens)
                     removed_records.append(
                         RemovedItemRecord(
                             entity=item.entity,
                             type=item.type,
                             file_or_document=item.file_or_document,
-                            reason=f"budget_exceeded: required {cost_full} tokens, only {remaining_budget} left",
+                            reason=f"budget_exceeded: item requires {full_tokens} full tokens, remaining budget is {remaining}",
                             original_tokens=full_tokens,
                             utility=utility,
                         )
                     )
 
             if active_graph_hops:
-                remaining_for_graph = max_token_budget - used_tokens
-                if remaining_for_graph >= 15:
-                    graph_lines = ["\n#### Relational Context & Traversal Paths"]
-                    for h in active_graph_hops:
-                        hop_str = f"- `{h.source_name}` -[{h.relation}]-> `{h.target_name}`"
-                        if h.confidence is not None:
-                            hop_str += f" (conf: {h.confidence:.2f})"
-                        graph_lines.append(hop_str)
+                graph_lines = ["\n#### Relational Context & Traversal Paths"]
+                for h in active_graph_hops:
+                    hop_str = f"- `{h.source_name}` -[{h.relation}]-> `{h.target_name}`"
+                    if h.confidence is not None:
+                        hop_str += f" (conf: {h.confidence:.2f})"
+                    graph_lines.append(hop_str)
 
-                    graph_section = "\n".join(graph_lines)
-                    graph_tokens = TokenEstimator.estimate_text(graph_section)
-                    if graph_tokens <= remaining_for_graph:
-                        rendered_blocks.append(graph_section)
-                        used_tokens += graph_tokens
+                graph_section = "\n".join(graph_lines)
+                cand_blocks_graph = rendered_blocks + [graph_section]
+                if self.count_tokens("\n\n".join(cand_blocks_graph).strip(), active_tok) <= max_token_budget:
+                    rendered_blocks.append(graph_section)
 
             final_context = "\n\n".join(rendered_blocks).strip()
-            final_input_tokens = TokenEstimator.estimate_text(final_context)
+            final_input_tokens = self.count_tokens(final_context, active_tok)
             provenance_audit = {
                 "all_sources_preserved": True,
                 "all_symbols_preserved": True,
@@ -882,8 +914,8 @@ class TokenOptimizationEngine:
                 candidates=deduped_candidates,
             )
 
-            # Check if guarded text exceeds token budget
-            guarded_tokens = TokenEstimator.estimate_text(guarded_text)
+            # Check if guarded text exceeds token budget under active tokenizer
+            guarded_tokens = self.count_tokens(guarded_text, active_tok)
             if guarded_tokens <= max_token_budget:
                 final_context = guarded_text
                 final_input_tokens = guarded_tokens
@@ -914,21 +946,32 @@ class TokenOptimizationEngine:
                 ledger_chunk = "\n".join(lines[ledger_start_idx:]) if ledger_start_idx != -1 else ""
                 body_chunk = "\n".join(lines[:ledger_start_idx]) if ledger_start_idx != -1 else guarded_text
 
-                body_lines = body_chunk.split("\n")
+                body_lines = [l for l in body_chunk.split("\n") if l.strip()]
                 kept_body_lines: list[str] = []
-                curr_tokens = TokenEstimator.estimate_text(ledger_chunk) + TokenEstimator.estimate_text(header)
 
                 for bl in body_lines:
-                    line_tok = TokenEstimator.estimate_text(bl)
-                    if curr_tokens + line_tok <= max_token_budget:
+                    test_ctx = ("\n".join(kept_body_lines + [bl]).strip() + "\n\n" + ledger_chunk).strip()
+                    if self.count_tokens(test_ctx, active_tok) <= max_token_budget:
                         kept_body_lines.append(bl)
-                        curr_tokens += line_tok
                     else:
                         break
 
-                final_context = "\n".join(kept_body_lines) + "\n\n" + ledger_chunk
-                final_context = final_context.strip()
-                final_input_tokens = TokenEstimator.estimate_text(final_context)
+                assembled_text = ("\n".join(kept_body_lines).strip() + "\n\n" + ledger_chunk).strip()
+
+                # If even ledger alone exceeds budget, safe truncate ledger lines
+                if self.count_tokens(assembled_text, active_tok) > max_token_budget:
+                    ledger_lines = ledger_chunk.split("\n")
+                    kept_ledger: list[str] = []
+                    for ll in ledger_lines:
+                        test_l = "\n".join(kept_ledger + [ll]).strip()
+                        if self.count_tokens(test_l, active_tok) <= max_token_budget:
+                            kept_ledger.append(ll)
+                        else:
+                            break
+                    assembled_text = "\n".join(kept_ledger).strip()
+
+                final_context = assembled_text
+                final_input_tokens = self.count_tokens(final_context, active_tok)
 
                 # Re-audit retained items
                 for item in deduped_candidates:
@@ -954,7 +997,7 @@ class TokenOptimizationEngine:
                                 type=item.type,
                                 file_or_document=item.file_or_document,
                                 reason="budget_exceeded: trimmed in compression budget enforcement",
-                                original_tokens=TokenEstimator.estimate_item(item, ContextTier.FULL),
+                                original_tokens=self.count_tokens(render_candidate_item(item, ContextTier.FULL), active_tok),
                                 utility=utility,
                             )
                         )
