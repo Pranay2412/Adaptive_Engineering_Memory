@@ -171,6 +171,102 @@ CREATE INDEX IF NOT EXISTS idx_memories_author ON memories(author_id);
 CREATE INDEX IF NOT EXISTS idx_memories_team ON memories(team_id);
 CREATE INDEX IF NOT EXISTS idx_memories_repo ON memories(repository_id);
 CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);
+
+CREATE TABLE IF NOT EXISTS git_commits (
+    commit_sha VARCHAR(64) NOT NULL,
+    repository_id VARCHAR(255) NOT NULL,
+    short_sha VARCHAR(16) NOT NULL,
+    author_name VARCHAR(255),
+    author_email VARCHAR(255),
+    authored_at TIMESTAMPTZ NOT NULL,
+    committer_name VARCHAR(255),
+    committer_email VARCHAR(255),
+    committed_at TIMESTAMPTZ NOT NULL,
+    message TEXT,
+    summary TEXT,
+    parent_shas JSONB DEFAULT '[]'::jsonb,
+    is_merge BOOLEAN DEFAULT FALSE,
+    branch VARCHAR(255),
+    files_changed JSONB DEFAULT '[]'::jsonb,
+    change_summary JSONB DEFAULT '{}'::jsonb,
+    selective_diff JSONB DEFAULT '{}'::jsonb,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (commit_sha, repository_id)
+);
+
+CREATE TABLE IF NOT EXISTS git_commit_links (
+    commit_sha VARCHAR(64) NOT NULL,
+    repository_id VARCHAR(255) NOT NULL,
+    target_type VARCHAR(50) NOT NULL,
+    target_id VARCHAR(255) NOT NULL,
+    confidence REAL DEFAULT 1.0,
+    reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (commit_sha, repository_id, target_type, target_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_git_commits_repo ON git_commits(repository_id);
+CREATE INDEX IF NOT EXISTS idx_git_commits_committed ON git_commits(committed_at);
+CREATE INDEX IF NOT EXISTS idx_git_commit_links_target ON git_commit_links(target_type, target_id);
+
+CREATE TABLE IF NOT EXISTS incremental_checkpoints (
+    id VARCHAR(255) PRIMARY KEY,
+    repository_id VARCHAR(255) NOT NULL,
+    user_id VARCHAR(255) NOT NULL,
+    commit_sha VARCHAR(64),
+    timestamp TIMESTAMPTZ NOT NULL,
+    file_hashes JSONB NOT NULL,
+    symbols_by_file JSONB DEFAULT '{}'::jsonb,
+    entities_by_file JSONB DEFAULT '{}'::jsonb,
+    edges_by_file JSONB DEFAULT '{}'::jsonb,
+    symbol_count INT DEFAULT 0,
+    entity_count INT DEFAULT 0,
+    edge_count INT DEFAULT 0,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_checkpoints_repo ON incremental_checkpoints(repository_id);
+
+CREATE TABLE IF NOT EXISTS security_audit_events (
+    id VARCHAR(255) PRIMARY KEY,
+    event_type VARCHAR(100) NOT NULL,
+    principal_id VARCHAR(255) NOT NULL,
+    tenant_id VARCHAR(255) NOT NULL,
+    repository_id VARCHAR(255),
+    team_id VARCHAR(255),
+    action VARCHAR(100) NOT NULL,
+    resource VARCHAR(255) NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    reason TEXT,
+    ip_address VARCHAR(100),
+    timestamp TIMESTAMPTZ NOT NULL,
+    metadata JSONB DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_principal ON security_audit_events(principal_id);
+CREATE INDEX IF NOT EXISTS idx_audit_tenant ON security_audit_events(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_audit_event_type ON security_audit_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON security_audit_events(timestamp);
+
+CREATE TABLE IF NOT EXISTS api_keys (
+    key_id VARCHAR(255) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    key_hash VARCHAR(64) NOT NULL UNIQUE,
+    prefix VARCHAR(32) NOT NULL,
+    tenant_id VARCHAR(255) NOT NULL,
+    principal_id VARCHAR(255) NOT NULL,
+    roles JSONB DEFAULT '[]'::jsonb,
+    allowed_repositories JSONB DEFAULT '[]'::jsonb,
+    allowed_teams JSONB DEFAULT '[]'::jsonb,
+    expires_at TIMESTAMPTZ,
+    revoked BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+CREATE INDEX IF NOT EXISTS idx_api_keys_tenant ON api_keys(tenant_id);
 """
 
 SQLITE_SCHEMA_DDL = """
@@ -316,6 +412,102 @@ CREATE INDEX IF NOT EXISTS idx_memories_author ON memories(author_id);
 CREATE INDEX IF NOT EXISTS idx_memories_team ON memories(team_id);
 CREATE INDEX IF NOT EXISTS idx_memories_repo ON memories(repository_id);
 CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);
+
+CREATE TABLE IF NOT EXISTS git_commits (
+    commit_sha TEXT NOT NULL,
+    repository_id TEXT NOT NULL,
+    short_sha TEXT NOT NULL,
+    author_name TEXT,
+    author_email TEXT,
+    authored_at TEXT NOT NULL,
+    committer_name TEXT,
+    committer_email TEXT,
+    committed_at TEXT NOT NULL,
+    message TEXT,
+    summary TEXT,
+    parent_shas TEXT,
+    is_merge INTEGER DEFAULT 0,
+    branch TEXT,
+    files_changed TEXT,
+    change_summary TEXT,
+    selective_diff TEXT,
+    metadata TEXT,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (commit_sha, repository_id)
+);
+
+CREATE TABLE IF NOT EXISTS git_commit_links (
+    commit_sha TEXT NOT NULL,
+    repository_id TEXT NOT NULL,
+    target_type TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    confidence REAL DEFAULT 1.0,
+    reason TEXT,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (commit_sha, repository_id, target_type, target_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_git_commits_repo ON git_commits(repository_id);
+CREATE INDEX IF NOT EXISTS idx_git_commits_committed ON git_commits(committed_at);
+CREATE INDEX IF NOT EXISTS idx_git_commit_links_target ON git_commit_links(target_type, target_id);
+
+CREATE TABLE IF NOT EXISTS incremental_checkpoints (
+    id TEXT PRIMARY KEY,
+    repository_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    commit_sha TEXT,
+    timestamp TEXT NOT NULL,
+    file_hashes TEXT NOT NULL,
+    symbols_by_file TEXT,
+    entities_by_file TEXT,
+    edges_by_file TEXT,
+    symbol_count INTEGER DEFAULT 0,
+    entity_count INTEGER DEFAULT 0,
+    edge_count INTEGER DEFAULT 0,
+    metadata TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_checkpoints_repo ON incremental_checkpoints(repository_id);
+
+CREATE TABLE IF NOT EXISTS security_audit_events (
+    id TEXT PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    principal_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    repository_id TEXT,
+    team_id TEXT,
+    action TEXT NOT NULL,
+    resource TEXT NOT NULL,
+    status TEXT NOT NULL,
+    reason TEXT,
+    ip_address TEXT,
+    timestamp TEXT NOT NULL,
+    metadata TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_principal ON security_audit_events(principal_id);
+CREATE INDEX IF NOT EXISTS idx_audit_tenant ON security_audit_events(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_audit_event_type ON security_audit_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON security_audit_events(timestamp);
+
+CREATE TABLE IF NOT EXISTS api_keys (
+    key_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    key_hash TEXT NOT NULL UNIQUE,
+    prefix TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    principal_id TEXT NOT NULL,
+    roles TEXT NOT NULL,
+    allowed_repositories TEXT NOT NULL,
+    allowed_teams TEXT NOT NULL,
+    expires_at TEXT,
+    revoked INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+CREATE INDEX IF NOT EXISTS idx_api_keys_tenant ON api_keys(tenant_id);
 """
 
 
@@ -1073,8 +1265,8 @@ class TeamMemoryDocumentStore:
                 params.append(user_id)
 
             if repository_id:
-                scope_conditions.append("(scope = 'repository' AND (author_id = ? OR repository_id = ?))")
-                params.extend([user_id, repository_id])
+                scope_conditions.append("(scope = 'repository' AND repository_id = ?)")
+                params.append(repository_id)
             else:
                 scope_conditions.append("(scope = 'repository' AND author_id = ?)")
                 params.append(user_id)
@@ -1119,3 +1311,455 @@ class TeamMemoryDocumentStore:
         cursor = self._conn.execute("SELECT COUNT(*) AS c FROM memories")
         row = cursor.fetchone()
         return row["c"] if row else 0
+
+    # --- Git Commits and Activity Links ---
+
+    def save_git_commit(self, commit: Any) -> Any:
+        """Persist or update a Git commit record."""
+        meta_json = json.dumps(commit.metadata, sort_keys=True) if commit.metadata else "{}"
+        parents_json = json.dumps(commit.parent_shas)
+        files_json = json.dumps(commit.files_changed)
+        change_json = json.dumps(commit.change_summary)
+        diff_json = json.dumps(commit.selective_diff)
+
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO git_commits (
+                    commit_sha, repository_id, short_sha, author_name, author_email,
+                    authored_at, committer_name, committer_email, committed_at,
+                    message, summary, parent_shas, is_merge, branch, files_changed,
+                    change_summary, selective_diff, metadata, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(commit_sha, repository_id) DO UPDATE SET
+                    summary=excluded.summary,
+                    message=excluded.message,
+                    files_changed=excluded.files_changed,
+                    change_summary=excluded.change_summary,
+                    selective_diff=excluded.selective_diff,
+                    metadata=excluded.metadata
+                """,
+                (
+                    commit.commit_sha,
+                    commit.repository_id,
+                    commit.short_sha,
+                    commit.author_name,
+                    commit.author_email,
+                    commit.authored_at,
+                    commit.committer_name,
+                    commit.committer_email,
+                    commit.committed_at,
+                    commit.message,
+                    commit.summary,
+                    parents_json,
+                    1 if commit.is_merge else 0,
+                    commit.branch,
+                    files_json,
+                    change_json,
+                    diff_json,
+                    meta_json,
+                    commit.created_at,
+                ),
+            )
+        return commit
+
+    def get_git_commit(self, commit_sha: str, repository_id: str) -> Any | None:
+        """Retrieve a specific Git commit by SHA and repository ID."""
+        from .git_memory import GitCommit
+
+        cursor = self._conn.execute(
+            "SELECT * FROM git_commits WHERE commit_sha = ? AND repository_id = ?",
+            (commit_sha, repository_id),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return GitCommit(
+            commit_sha=row["commit_sha"],
+            repository_id=row["repository_id"],
+            short_sha=row["short_sha"],
+            author_name=row["author_name"] or "",
+            author_email=row["author_email"] or "",
+            authored_at=row["authored_at"],
+            committer_name=row["committer_name"] or "",
+            committer_email=row["committer_email"] or "",
+            committed_at=row["committed_at"],
+            message=row["message"] or "",
+            summary=row["summary"] or "",
+            parent_shas=json.loads(row["parent_shas"]) if row["parent_shas"] else [],
+            is_merge=bool(row["is_merge"]),
+            branch=row["branch"],
+            files_changed=json.loads(row["files_changed"]) if row["files_changed"] else [],
+            change_summary=json.loads(row["change_summary"]) if row["change_summary"] else {},
+            selective_diff=json.loads(row["selective_diff"]) if row["selective_diff"] else {},
+            metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            created_at=row["created_at"],
+        )
+
+    def list_git_commits(self, repository_id: str, limit: int = 50) -> list[Any]:
+        """List Git commits for a repository ordered by committed_at DESC."""
+        from .git_memory import GitCommit
+
+        cursor = self._conn.execute(
+            "SELECT * FROM git_commits WHERE repository_id = ? ORDER BY committed_at DESC LIMIT ?",
+            (repository_id, limit),
+        )
+        rows = cursor.fetchall()
+        return [
+            GitCommit(
+                commit_sha=row["commit_sha"],
+                repository_id=row["repository_id"],
+                short_sha=row["short_sha"],
+                author_name=row["author_name"] or "",
+                author_email=row["author_email"] or "",
+                authored_at=row["authored_at"],
+                committer_name=row["committer_name"] or "",
+                committer_email=row["committer_email"] or "",
+                committed_at=row["committed_at"],
+                message=row["message"] or "",
+                summary=row["summary"] or "",
+                parent_shas=json.loads(row["parent_shas"]) if row["parent_shas"] else [],
+                is_merge=bool(row["is_merge"]),
+                branch=row["branch"],
+                files_changed=json.loads(row["files_changed"]) if row["files_changed"] else [],
+                change_summary=json.loads(row["change_summary"]) if row["change_summary"] else {},
+                selective_diff=json.loads(row["selective_diff"]) if row["selective_diff"] else {},
+                metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
+
+    def save_git_commit_link(self, link: Any) -> Any:
+        """Persist or update a Git commit entity link."""
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO git_commit_links (
+                    commit_sha, repository_id, target_type, target_id,
+                    confidence, reason, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(commit_sha, repository_id, target_type, target_id) DO UPDATE SET
+                    confidence=excluded.confidence,
+                    reason=excluded.reason
+                """,
+                (
+                    link.commit_sha,
+                    link.repository_id,
+                    link.target_type,
+                    link.target_id,
+                    link.confidence,
+                    link.reason,
+                    link.created_at,
+                ),
+            )
+        return link
+
+    def get_git_commit_links(self, commit_sha: str, repository_id: str) -> list[Any]:
+        """Get all entity links associated with a commit."""
+        from .git_memory import GitCommitLink
+
+        cursor = self._conn.execute(
+            "SELECT * FROM git_commit_links WHERE commit_sha = ? AND repository_id = ?",
+            (commit_sha, repository_id),
+        )
+        rows = cursor.fetchall()
+        return [
+            GitCommitLink(
+                commit_sha=row["commit_sha"],
+                repository_id=row["repository_id"],
+                target_type=row["target_type"],
+                target_id=row["target_id"],
+                confidence=row["confidence"],
+                reason=row["reason"],
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
+
+    def get_links_for_target(self, target_type: str, target_id: str) -> list[Any]:
+        """Get all commit links associated with a target (symbol, decision, etc.)."""
+        from .git_memory import GitCommitLink
+
+        cursor = self._conn.execute(
+            "SELECT * FROM git_commit_links WHERE target_type = ? AND target_id = ?",
+            (target_type, target_id),
+        )
+        rows = cursor.fetchall()
+        return [
+            GitCommitLink(
+                commit_sha=row["commit_sha"],
+                repository_id=row["repository_id"],
+                target_type=row["target_type"],
+                target_id=row["target_id"],
+                confidence=row["confidence"],
+                reason=row["reason"],
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
+
+    # --- Incremental Checkpoints ---
+
+    def save_checkpoint(self, checkpoint: Any) -> Any:
+        """Persist or update an incremental repository checkpoint."""
+        hashes_json = json.dumps(checkpoint.file_hashes, sort_keys=True)
+        symbols_json = json.dumps(getattr(checkpoint, "symbols_by_file", {}), sort_keys=True)
+        entities_json = json.dumps(getattr(checkpoint, "entities_by_file", {}), sort_keys=True)
+        edges_json = json.dumps(getattr(checkpoint, "edges_by_file", {}), sort_keys=True)
+        meta_json = json.dumps(checkpoint.metadata, sort_keys=True) if checkpoint.metadata else "{}"
+
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO incremental_checkpoints (
+                    id, repository_id, user_id, commit_sha, timestamp,
+                    file_hashes, symbols_by_file, entities_by_file, edges_by_file,
+                    symbol_count, entity_count, edge_count, metadata, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    commit_sha=excluded.commit_sha,
+                    timestamp=excluded.timestamp,
+                    file_hashes=excluded.file_hashes,
+                    symbols_by_file=excluded.symbols_by_file,
+                    entities_by_file=excluded.entities_by_file,
+                    edges_by_file=excluded.edges_by_file,
+                    symbol_count=excluded.symbol_count,
+                    entity_count=excluded.entity_count,
+                    edge_count=excluded.edge_count,
+                    metadata=excluded.metadata
+                """,
+                (
+                    checkpoint.id,
+                    checkpoint.repository_id,
+                    checkpoint.user_id,
+                    checkpoint.commit_sha,
+                    checkpoint.timestamp,
+                    hashes_json,
+                    symbols_json,
+                    entities_json,
+                    edges_json,
+                    checkpoint.symbol_count,
+                    checkpoint.entity_count,
+                    checkpoint.edge_count,
+                    meta_json,
+                    checkpoint.created_at,
+                ),
+            )
+        return checkpoint
+
+    def get_latest_checkpoint(self, repository_id: str) -> Any | None:
+        """Retrieve the most recent checkpoint for a given repository."""
+        from .incremental_update import RepositoryCheckpoint
+
+        cursor = self._conn.execute(
+            """
+            SELECT * FROM incremental_checkpoints
+            WHERE repository_id = ?
+            ORDER BY timestamp DESC, created_at DESC
+            LIMIT 1
+            """,
+            (repository_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return RepositoryCheckpoint(
+            id=row["id"],
+            repository_id=row["repository_id"],
+            user_id=row["user_id"],
+            commit_sha=row["commit_sha"],
+            timestamp=row["timestamp"],
+            file_hashes=json.loads(row["file_hashes"]) if row["file_hashes"] else {},
+            symbols_by_file=json.loads(row["symbols_by_file"]) if row["symbols_by_file"] else {},
+            entities_by_file=json.loads(row["entities_by_file"]) if row["entities_by_file"] else {},
+            edges_by_file=json.loads(row["edges_by_file"]) if row["edges_by_file"] else {},
+            symbol_count=int(row["symbol_count"]),
+            entity_count=int(row["entity_count"]),
+            edge_count=int(row["edge_count"]),
+            metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            created_at=row["created_at"],
+        )
+
+    def list_checkpoints(self, repository_id: str, limit: int = 20) -> list[Any]:
+        """List historical checkpoints for a given repository."""
+        from .incremental_update import RepositoryCheckpoint
+
+        cursor = self._conn.execute(
+            """
+            SELECT * FROM incremental_checkpoints
+            WHERE repository_id = ?
+            ORDER BY timestamp DESC, created_at DESC
+            LIMIT ?
+            """,
+            (repository_id, limit),
+        )
+        rows = cursor.fetchall()
+        return [
+            RepositoryCheckpoint(
+                id=row["id"],
+                repository_id=row["repository_id"],
+                user_id=row["user_id"],
+                commit_sha=row["commit_sha"],
+                timestamp=row["timestamp"],
+                file_hashes=json.loads(row["file_hashes"]) if row["file_hashes"] else {},
+                symbols_by_file=json.loads(row["symbols_by_file"]) if row["symbols_by_file"] else {},
+                entities_by_file=json.loads(row["entities_by_file"]) if row["entities_by_file"] else {},
+                edges_by_file=json.loads(row["edges_by_file"]) if row["edges_by_file"] else {},
+                symbol_count=int(row["symbol_count"]),
+                entity_count=int(row["entity_count"]),
+                edge_count=int(row["edge_count"]),
+                metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
+
+    # --- Security Audit Events ---
+
+    def log_audit_event(self, event: Any) -> Any:
+        """Persist a security audit trail event."""
+        meta_json = json.dumps(event.metadata, sort_keys=True) if event.metadata else "{}"
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO security_audit_events (
+                    id, event_type, principal_id, tenant_id, repository_id, team_id,
+                    action, resource, status, reason, ip_address, timestamp, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event.id,
+                    event.event_type,
+                    event.principal_id,
+                    event.tenant_id,
+                    event.repository_id,
+                    event.team_id,
+                    event.action,
+                    event.resource,
+                    event.status,
+                    event.reason,
+                    event.ip_address,
+                    event.timestamp,
+                    meta_json,
+                ),
+            )
+        return event
+
+    def list_audit_events(
+        self,
+        tenant_id: str | None = None,
+        principal_id: str | None = None,
+        event_type: str | None = None,
+        limit: int = 50,
+    ) -> list[Any]:
+        """Query security audit events with optional filters."""
+        from .security import SecurityAuditEvent
+
+        clauses = []
+        params = []
+        if tenant_id:
+            clauses.append("tenant_id = ?")
+            params.append(tenant_id)
+        if principal_id:
+            clauses.append("principal_id = ?")
+            params.append(principal_id)
+        if event_type:
+            clauses.append("event_type = ?")
+            params.append(event_type)
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        sql = f"SELECT * FROM security_audit_events {where} ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+
+        cursor = self._conn.execute(sql, params)
+        rows = cursor.fetchall()
+        return [
+            SecurityAuditEvent(
+                id=row["id"],
+                event_type=row["event_type"],
+                principal_id=row["principal_id"],
+                tenant_id=row["tenant_id"],
+                repository_id=row["repository_id"],
+                team_id=row["team_id"],
+                action=row["action"],
+                resource=row["resource"],
+                status=row["status"],
+                reason=row["reason"],
+                ip_address=row["ip_address"],
+                timestamp=row["timestamp"],
+                metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            )
+            for row in rows
+        ]
+
+    # --- API Keys ---
+
+    def save_api_key(self, api_key: Any) -> Any:
+        """Persist or update an API key record."""
+        roles_json = json.dumps(api_key.roles)
+        repos_json = json.dumps(api_key.allowed_repositories)
+        teams_json = json.dumps(api_key.allowed_teams)
+
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO api_keys (
+                    key_id, name, key_hash, prefix, tenant_id, principal_id,
+                    roles, allowed_repositories, allowed_teams, expires_at, revoked, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(key_id) DO UPDATE SET
+                    name=excluded.name,
+                    roles=excluded.roles,
+                    allowed_repositories=excluded.allowed_repositories,
+                    allowed_teams=excluded.allowed_teams,
+                    expires_at=excluded.expires_at,
+                    revoked=excluded.revoked
+                """,
+                (
+                    api_key.key_id,
+                    api_key.name,
+                    api_key.key_hash,
+                    api_key.prefix,
+                    api_key.tenant_id,
+                    api_key.principal_id,
+                    roles_json,
+                    repos_json,
+                    teams_json,
+                    api_key.expires_at,
+                    1 if api_key.revoked else 0,
+                    api_key.created_at,
+                ),
+            )
+        return api_key
+
+    def get_api_key_by_hash(self, key_hash: str) -> Any | None:
+        """Find an API key record by SHA-256 hash."""
+        from .security import ApiKeyRecord
+
+        cursor = self._conn.execute("SELECT * FROM api_keys WHERE key_hash = ?", (key_hash,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return ApiKeyRecord(
+            key_id=row["key_id"],
+            name=row["name"],
+            key_hash=row["key_hash"],
+            prefix=row["prefix"],
+            tenant_id=row["tenant_id"],
+            principal_id=row["principal_id"],
+            roles=json.loads(row["roles"]) if row["roles"] else [],
+            allowed_repositories=json.loads(row["allowed_repositories"]) if row["allowed_repositories"] else [],
+            allowed_teams=json.loads(row["allowed_teams"]) if row["allowed_teams"] else [],
+            expires_at=row["expires_at"],
+            revoked=bool(row["revoked"]),
+            created_at=row["created_at"],
+        )
+
+    def revoke_api_key(self, key_id: str) -> bool:
+        """Mark an API key as revoked."""
+        with self._conn:
+            cursor = self._conn.execute("UPDATE api_keys SET revoked = 1 WHERE key_id = ?", (key_id,))
+            return cursor.rowcount > 0
+
+

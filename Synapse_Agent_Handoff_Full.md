@@ -625,26 +625,40 @@ and artifacts.
   Prompt 3 --- Freeze     Complete (14-10-2026)   docs/experiments/BASELINE_FREEZE.md;
   baseline                                        Tag baseline-v1.0.0 proposed
 
-  Phase 6.1 --- Session   Planned / verify        Spec and tests
-  protocol                                        
+  Phase 6.1 --- Session   Complete (14-10-2026)   backend/session_protocol.py;
+  protocol                                        docs/specs/session_protocol_v1.md;
+                                                  tests/test_session_protocol.py (28 passed)
 
-  Phase 6.2 --- API       Core functions          Independent-client tests
-                          reported; service       
-                          readiness unverified    
+  Phase 6.2 --- API       Complete (14-10-2026)   backend/api.py;
+                                                  docs/api/session_context_api.md;
+                                                  tests/test_api.py (17 passed);
+                                                  examples/client_demo.py
 
-  Phase 6.3 --- MCP       Planned / verify        MCP client test
-  adapter                                         
+  Phase 6.3 --- MCP       Complete (14-10-2026)   backend/mcp_server.py;
+  adapter                                         docs/mcp/synapse_mcp_setup.md;
+                                                  tests/test_mcp_adapter.py (9 passed)
 
-  Phase 6.4 --- Cross-IDE Not fully implemented   Real IDE E2E test
-                          in prior notes          
+  Phase 6.4 --- Cross-IDE Complete (14-10-2026)   backend/ide_client.py;
+                                                  tests/test_ide_e2e_integration.py (6 passed);
+                                                  docs/integrations/vscode_cursor_mcp_integration.md
 
-  Phase 7 --- Git memory  Planned                 Ingestion/retrieval tests
+  Phase 7 --- Git memory  Complete (14-10-2026)   backend/git_memory.py;
+                                                  backend/team_memory_store.py;
+                                                  docs/specs/git_activity_memory.md;
+                                                  tests/test_git_memory.py (10 passed)
 
-  Phase 8 --- Incremental Planned                 Incremental vs rebuild
-  updates                                         consistency
+  Phase 8 --- Incremental Complete (14-10-2026)   backend/incremental_update.py;
+  updates                                         backend/hybrid_retrieval.py;
+                                                  backend/team_memory_store.py;
+                                                  docs/specs/incremental_updates.md;
+                                                  tests/test_incremental_update.py (8 passed)
 
-  Phase 9 --- Auth/authz  Planned / verify        Isolation and
-                                                  access-control tests
+  Phase 9 --- Auth/authz  Complete (14-10-2026)   backend/security.py;
+                                                  backend/session_protocol.py;
+                                                  backend/api.py;
+                                                  backend/team_memory_store.py;
+                                                  docs/specs/auth_and_authorization.md;
+                                                  tests/test_auth_security.py (25 passed)
 
   Phase 10 --- FastAPI    Planned / verify        Startup and API tests
 
