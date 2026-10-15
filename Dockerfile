@@ -65,8 +65,9 @@ COPY --chown=synapse:synapse Dockerfile /app/Dockerfile
 COPY --chown=synapse:synapse docker-compose.yml /app/docker-compose.yml
 COPY --chown=synapse:synapse .dockerignore /app/.dockerignore
 
-# Set execute permissions on entrypoint script
-RUN chmod +x /app/scripts/docker-entrypoint.sh
+# Set execute permissions and sanitize line endings on entrypoint script
+RUN sed -i 's/\r$//' /app/scripts/docker-entrypoint.sh && \
+    chmod +x /app/scripts/docker-entrypoint.sh
 
 # Drop privileges to non-root user
 USER synapse:synapse

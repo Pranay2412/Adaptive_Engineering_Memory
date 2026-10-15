@@ -264,9 +264,17 @@ def get_embedding_provider(
     has_gemini_key = bool(os.environ.get("GEMINI_API_KEY") or (os.environ.get("LLM_PROVIDER") == "gemini" and os.environ.get("LLM_API_KEY")))
 
     if name == "openai" or (not name and has_openai_key):
-        return OpenAIEmbeddingProvider(api_key=api_key, model=model)
+        try:
+            return OpenAIEmbeddingProvider(api_key=api_key, model=model)
+        except Exception as e:
+            logger.warning("Failed to initialize OpenAIEmbeddingProvider (%s); falling back to MockEmbeddingProvider.", e)
+            return MockEmbeddingProvider()
     if name == "gemini" or (not name and has_gemini_key):
-        return GeminiEmbeddingProvider(api_key=api_key, model=model)
+        try:
+            return GeminiEmbeddingProvider(api_key=api_key, model=model)
+        except Exception as e:
+            logger.warning("Failed to initialize GeminiEmbeddingProvider (%s); falling back to MockEmbeddingProvider.", e)
+            return MockEmbeddingProvider()
 
     return MockEmbeddingProvider()
 
