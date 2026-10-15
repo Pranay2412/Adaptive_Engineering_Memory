@@ -698,7 +698,10 @@ and artifacts.
                                                   docs/experiments/performance_and_cost_optimization.md;
                                                   tests/test_performance_optimization.py (13 passed)
 
-  Phase 16 --- Dashboard  Planned                 Tested UI/API flow
+  Phase 16 --- Dashboard  Complete (15-10-2026)   backend/static/dashboard.html;
+                                                  backend/api.py dashboard endpoints;
+                                                  tests/test_dashboard.py (7 passed);
+                                                  full test suite (404 passed)
 
   Phase 17 --- Deployment Planned                 Clean-environment
                                                   deployment

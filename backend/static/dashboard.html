@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Synapse — Adaptive Engineering Memory Dashboard</title>
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: #111827;
+      --card-border: #1f2937;
+      --card-hover: #1e293b;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+      --emerald: #10b981;
+      --amber: #f59e0b;
+      --rose: #ef4444;
+      --cyan: #06b6d4;
+      --indigo-glow: rgba(99, 102, 241, 0.15);
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Layout */
+    .app-header {
+      background: #0d1322;
+      border-bottom: 1px solid var(--card-border);
+      padding: 0.75rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, #6366f1, #a855f7);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 1.1rem;
+      color: #fff;
+      box-shadow: 0 0 12px rgba(99, 102, 241, 0.5);
+    }
+    .brand-title {
+      font-weight: 700;
+      font-size: 1.15rem;
+      letter-spacing: -0.02em;
+    }
+    .brand-subtitle {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-left: 0.5rem;
+      padding-left: 0.5rem;
+      border-left: 1px solid var(--card-border);
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.25rem 0.65rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .badge-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+    .badge-success { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .badge-success .badge-dot { background: #34d399; box-shadow: 0 0 6px #34d399; }
+    .badge-warning { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+    .badge-warning .badge-dot { background: #fbbf24; }
+    .badge-danger { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+    .badge-info { background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3); }
+
+    .nav-tabs {
+      background: #0d1322;
+      border-bottom: 1px solid var(--card-border);
+      padding: 0 1.5rem;
+      display: flex;
+      gap: 0.5rem;
+    }
+    .tab-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      padding: 0.85rem 1rem;
+      font-size: 0.875rem;
+      font-weight: 600;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+    }
+
+    .main-container {
+      max-width: 1380px;
+      margin: 0 auto;
+      padding: 1.5rem;
+    }
+
+    /* Cards & Grids */
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.75rem;
+    }
+    .card-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+    .metric-value {
+      font-size: 1.85rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .metric-sub {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+    }
+
+    /* Query Console */
+    .query-box {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .canonical-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .chip {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #94a3b8;
+      padding: 0.35rem 0.75rem;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .chip:hover {
+      background: #334155;
+      color: var(--text);
+      border-color: var(--primary);
+    }
+    .input-row {
+      display: flex;
+      gap: 0.75rem;
+    }
+    .query-input {
+      flex: 1;
+      background: #0b1120;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      color: var(--text);
+      font-size: 0.95rem;
+      font-family: inherit;
+    }
+    .query-input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+    }
+    .btn {
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 0.75rem 1.5rem;
+      font-weight: 600;
+      font-size: 0.9rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: background 0.15s;
+    }
+    .btn:hover { background: var(--primary-hover); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .controls-row {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+      background: #0b1120;
+      border: 1px solid #1e293b;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+    }
+    .control-group {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.85rem;
+    }
+    .control-label { color: var(--text-muted); font-weight: 500; }
+    .control-select {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: var(--text);
+      padding: 0.35rem 0.65rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+    }
+
+    /* Response & Provenance */
+    .response-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 1.25rem;
+      background: #0b1120;
+      border-bottom: 1px solid var(--card-border);
+      border-radius: 12px 12px 0 0;
+    }
+    .token-breakdown-bar {
+      display: flex;
+      height: 10px;
+      background: #1e293b;
+      border-radius: 5px;
+      overflow: hidden;
+      margin: 1rem 0 0.5rem 0;
+    }
+    .token-seg-knowledge { background: #6366f1; }
+    .token-seg-query { background: #06b6d4; }
+    .token-seg-inst { background: #a855f7; }
+    .token-seg-free { background: #334155; }
+
+    .token-legend {
+      display: flex;
+      gap: 1.25rem;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+    .legend-item { display: flex; align-items: center; gap: 0.35rem; }
+    .legend-color { width: 8px; height: 8px; border-radius: 2px; }
+
+    .evidence-cards {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      margin-top: 1rem;
+    }
+    .evidence-card {
+      background: #0b1120;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      transition: border-color 0.15s;
+    }
+    .evidence-card:hover { border-color: #3b82f6; }
+    .evidence-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .evidence-entity {
+      font-weight: 700;
+      font-size: 0.95rem;
+      color: #93c5fd;
+    }
+    .evidence-location {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: #cbd5e1;
+    }
+    .evidence-meta {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+    }
+    .channel-tag {
+      background: #1e293b;
+      border: 1px solid #334155;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      color: #94a3b8;
+    }
+    .graph-path {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: #c084fc;
+      background: rgba(168, 85, 247, 0.1);
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      margin-top: 0.25rem;
+    }
+
+    /* Tables */
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+      margin-top: 0.75rem;
+    }
+    .data-table th {
+      text-align: left;
+      padding: 0.65rem 0.85rem;
+      border-bottom: 1px solid #1e293b;
+      color: var(--text-muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.7rem;
+      letter-spacing: 0.05em;
+    }
+    .data-table td {
+      padding: 0.75rem 0.85rem;
+      border-bottom: 1px solid #131b2e;
+    }
+    .data-table tr:hover td { background: #0e1526; }
+
+    /* Alert Banners */
+    .alert-banner {
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+      padding: 0.85rem 1.25rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .spinner {
+      width: 18px;
+      height: 18px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Code & Prompt viewer */
+    .code-box {
+      background: #070b13;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 1rem;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      white-space: pre-wrap;
+      overflow-x: auto;
+      max-height: 400px;
+      color: #cbd5e1;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Application Bar -->
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-icon">S</div>
+      <div>
+        <span class="brand-title">Synapse</span>
+        <span class="brand-subtitle">Adaptive Engineering Memory Platform</span>
+      </div>
+    </div>
+    <div class="header-actions">
+      <div id="status-pill" class="badge badge-success">
+        <span class="badge-dot"></span>
+        <span id="status-text">INITIALIZING</span>
+      </div>
+      <div class="badge badge-info">
+        <span>Protocol:</span>
+        <span id="proto-version" style="font-family: var(--font-mono)">v1.0</span>
+      </div>
+      <div class="badge badge-warning" id="env-badge">
+        <span id="env-mode">DEVELOPMENT</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs -->
+  <nav class="nav-tabs">
+    <button class="tab-btn active" onclick="switchTab('overview')">
+      <span>Overview & Telemetry</span>
+    </button>
+    <button class="tab-btn" onclick="switchTab('query')">
+      <span>Interactive Query Console</span>
+    </button>
+    <button class="tab-btn" onclick="switchTab('repositories')">
+      <span>Repositories & Ingestion Jobs</span>
+    </button>
+    <button class="tab-btn" onclick="switchTab('memory')">
+      <span>Sessions & Team ADRs</span>
+    </button>
+    <button class="tab-btn" onclick="switchTab('security')">
+      <span>Security & Audit Logs</span>
+    </button>
+  </nav>
+
+  <!-- Main View Container -->
+  <main class="main-container">
+    <div id="error-banner" class="alert-banner" style="display: none;">
+      <span id="error-message">Error message</span>
+      <button class="chip" onclick="dismissError()">Dismiss</button>
+    </div>
+
+    <!-- TAB 1: OVERVIEW & TELEMETRY -->
+    <section id="tab-overview">
+      <div class="grid-4">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Indexed Symbols</span>
+            <span class="badge badge-info">AST Graph</span>
+          </div>
+          <div class="metric-value" id="stat-symbols">--</div>
+          <div class="metric-sub">Across verified repository modules</div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Document Concepts</span>
+            <span class="badge badge-info">Specs & RFCs</span>
+          </div>
+          <div class="metric-value" id="stat-concepts">--</div>
+          <div class="metric-sub">Architectural markdown entities</div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Team Memories / ADRs</span>
+            <span class="badge badge-success">Persistent</span>
+          </div>
+          <div class="metric-value" id="stat-memories">--</div>
+          <div class="metric-sub">Decisions, root causes, patterns</div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Cache Hit Rate</span>
+            <span class="badge badge-success" id="cache-hit-badge">LRU Multi-tier</span>
+          </div>
+          <div class="metric-value" id="stat-cache-hit">--%</div>
+          <div class="metric-sub" id="stat-cache-sub">Saved -- LLM embedding calls</div>
+        </div>
+      </div>
+
+      <!-- Cache Subsystem Telemetry Table -->
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-header">
+          <span class="card-title">Multi-Tier Caching Subsystem Status (Phase 15 Telemetry)</span>
+          <button class="chip" onclick="refreshOverview()">Refresh Telemetry</button>
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Cache Layer</th>
+              <th>Current Size</th>
+              <th>Capacity</th>
+              <th>Hits / Misses</th>
+              <th>Hit Rate</th>
+              <th>TTL</th>
+              <th>Savings</th>
+            </tr>
+          </thead>
+          <tbody id="cache-telemetry-body">
+            <tr><td colspan="7" style="text-align: center; color: var(--text-muted);">Loading cache telemetry...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Token Economy & Definitions Guide Card -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Token Economy Standards (Section 7 Governance)</span>
+        </div>
+        <div style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.6;">
+          <p><strong>Knowledge Context Tokens:</strong> Strictly retrieved engineering memory, symbols, and architectural chunks injected into the prompt context.</p>
+          <p><strong>Query Tokens:</strong> The sanitized user question.</p>
+          <p><strong>Instruction Tokens:</strong> Static system instructions and developer role definitions.</p>
+          <p><strong>Budget Utilization:</strong> <code style="font-family: var(--font-mono); color: #818cf8;">Knowledge Tokens / Configured Context Budget</code>. Synapse guarantees zero silent budget overruns.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: INTERACTIVE QUERY CONSOLE -->
+    <section id="tab-query" style="display: none;">
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-header">
+          <span class="card-title">Interactive Context Orchestration Console (Live API)</span>
+        </div>
+        <div class="query-box">
+          <div>
+            <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Canonical Evaluation Queries:</span>
+            <div class="canonical-chips" style="margin-top: 0.35rem;">
+              <button class="chip" onclick="setQuery('SYN-Q01', 'What modules import models.py?')">SYN-Q01 (Structural)</button>
+              <button class="chip" onclick="setQuery('SYN-Q02', 'How does authentication work with JWT?')">SYN-Q02 (Implementation)</button>
+              <button class="chip" onclick="setQuery('SYN-Q03', 'Which components call the authentication service?')">SYN-Q03 (Dependency)</button>
+              <button class="chip" onclick="setQuery('SYN-Q04', 'Where could JWT verification fail and what code is involved?')">SYN-Q04 (Debugging)</button>
+              <button class="chip" onclick="setQuery('SYN-Q05', 'Why do we use utility-density knapsack optimization?')">SYN-Q05 (Architecture)</button>
+            </div>
+          </div>
+
+          <div class="input-row">
+            <input id="query-input-field" type="text" class="query-input" placeholder="Ask an engineering memory or codebase question..." value="How does authentication work with JWT?">
+            <button id="run-query-btn" class="btn" onclick="executeInteractiveQuery()">
+              <span id="btn-text">Orchestrate Context</span>
+              <div id="btn-spinner" class="spinner" style="display: none;"></div>
+            </button>
+          </div>
+
+          <div class="controls-row">
+            <div class="control-group">
+              <span class="control-label">Context Budget:</span>
+              <input type="range" id="budget-range" min="500" max="4000" step="100" value="1500" oninput="document.getElementById('budget-val').innerText = this.value + ' tokens'">
+              <span id="budget-val" style="font-family: var(--font-mono); font-weight: 600; color: #818cf8;">1500 tokens</span>
+            </div>
+            <div class="control-group">
+              <span class="control-label">ACO Mode:</span>
+              <select id="aco-mode-select" class="control-select">
+                <option value="deterministic" selected>Deterministic (Knapsack Compaction)</option>
+                <option value="none">None (Greedy Budget Truncation)</option>
+                <option value="llm">LLM Structured Compression</option>
+              </select>
+            </div>
+            <div class="control-group">
+              <span class="control-label">Repository:</span>
+              <span style="font-family: var(--font-mono); font-weight: 600;">synapse-core</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Query Results Section -->
+      <div id="query-results-container" class="card" style="display: none; padding: 0;">
+        <div class="response-header">
+          <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <span class="badge badge-info" id="res-intent-badge">INTENT: --</span>
+            <span class="badge badge-success" id="res-cache-badge">⚡ CACHED (3.4ms)</span>
+            <span style="font-size: 0.8rem; color: var(--text-muted);" id="res-latency">Elapsed: -- ms</span>
+          </div>
+          <div>
+            <button class="chip" onclick="toggleContextView()">Toggle Assembled Prompt</button>
+          </div>
+        </div>
+
+        <div style="padding: 1.25rem;">
+          <!-- Token Economics Bar -->
+          <div style="display: flex; justify-content: space-between; align-items: flex-end;">
+            <span style="font-size: 0.85rem; font-weight: 600;">Context Budget Allocation</span>
+            <span style="font-size: 0.85rem; font-family: var(--font-mono);" id="budget-summary-text">701 / 1500 tokens (46.7% utilization)</span>
+          </div>
+          <div class="token-breakdown-bar">
+            <div id="bar-knowledge" class="token-seg-knowledge" style="width: 46%;"></div>
+            <div id="bar-query" class="token-seg-query" style="width: 2%;"></div>
+            <div id="bar-inst" class="token-seg-inst" style="width: 6%;"></div>
+            <div id="bar-free" class="token-seg-free" style="width: 46%;"></div>
+          </div>
+          <div class="token-legend">
+            <div class="legend-item"><div class="legend-color" style="background: #6366f1;"></div><span id="leg-knowledge">Knowledge: 701</span></div>
+            <div class="legend-item"><div class="legend-color" style="background: #06b6d4;"></div><span id="leg-query">Query: 12</span></div>
+            <div class="legend-item"><div class="legend-color" style="background: #a855f7;"></div><span id="leg-inst">Instruction: 85</span></div>
+            <div class="legend-item"><div class="legend-color" style="background: #334155;"></div><span id="leg-free">Free Budget: 702</span></div>
+          </div>
+
+          <!-- Assembled Prompt Preview (Collapsible) -->
+          <div id="assembled-prompt-box" style="display: none; margin-top: 1.25rem;">
+            <span style="font-size: 0.75rem; text-transform: uppercase; font-weight: 600; color: var(--text-muted);">Assembled Prompt Context Preview:</span>
+            <div class="code-box" id="prompt-preview-text" style="margin-top: 0.5rem;"></div>
+          </div>
+
+          <!-- Retained Evidence Cards -->
+          <div style="margin-top: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-size: 0.85rem; font-weight: 600;">Retained Evidence Items (Provenanced Knowledge)</span>
+              <span style="font-size: 0.75rem; color: var(--text-muted);" id="evidence-count-badge">-- items</span>
+            </div>
+            <div id="evidence-list" class="evidence-cards">
+              <!-- Cards rendered dynamically -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: REPOSITORIES & INGESTION JOBS -->
+    <section id="tab-repositories" style="display: none;">
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-header">
+          <span class="card-title">Registered Repositories & Knowledge Graphs</span>
+          <button class="chip" onclick="refreshRepositories()">Refresh</button>
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Repository ID</th>
+              <th>Status</th>
+              <th>Code Symbols</th>
+              <th>Doc Concepts</th>
+              <th>Graph Edges</th>
+              <th>Latest Checkpoint</th>
+              <th>Last Ingested</th>
+            </tr>
+          </thead>
+          <tbody id="repositories-table-body">
+            <tr><td colspan="7" style="text-align: center; color: var(--text-muted);">Loading repository status...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Recent Ingestion & Incremental Update Jobs (Phase 8 Audit)</span>
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Job / Checkpoint ID</th>
+              <th>Type</th>
+              <th>Files Added / Mod / Del</th>
+              <th>Symbols Extracted</th>
+              <th>Duration (ms)</th>
+              <th>Timestamp</th>
+            </tr>
+          </thead>
+          <tbody id="jobs-table-body">
+            <tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Loading checkpoint history...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- TAB 4: SESSIONS & TEAM MEMORY -->
+    <section id="tab-memory" style="display: none;">
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-header">
+          <span class="card-title">Persistent Team Engineering Memories (ADRs & Decisions)</span>
+          <button class="chip" onclick="refreshMemories()">Refresh</button>
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Memory Title / Decision</th>
+              <th>Category</th>
+              <th>Scope</th>
+              <th>Author</th>
+              <th>Impact Areas</th>
+              <th>Actionable Takeaways</th>
+            </tr>
+          </thead>
+          <tbody id="memories-table-body">
+            <tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Loading memories...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Active AI Sessions (Phase 6.1 Protocol)</span>
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Session ID</th>
+              <th>Client Type</th>
+              <th>Status</th>
+              <th>Repository</th>
+              <th>Created At</th>
+              <th>Context Queries</th>
+            </tr>
+          </thead>
+          <tbody id="sessions-table-body">
+            <tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Loading active sessions...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- TAB 5: SECURITY & AUDIT LOGS -->
+    <section id="tab-security" style="display: none;">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Security Audit Stream (Phase 9 RBAC Enforcement)</span>
+          <button class="chip" onclick="refreshAuditLogs()">Refresh Audit</button>
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Event Type</th>
+              <th>Principal ID</th>
+              <th>Tenant ID</th>
+              <th>Target Resource</th>
+              <th>Decision</th>
+            </tr>
+          </thead>
+          <tbody id="audit-table-body">
+            <tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Loading audit events...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- Dashboard Client Logic -->
+  <script>
+    let activeTab = 'overview';
+
+    function switchTab(tabName) {
+      activeTab = tabName;
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('section[id^="tab-"]').forEach(s => s.style.display = 'none');
+
+      const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.onclick.toString().includes(tabName));
+      if (activeBtn) activeBtn.classList.add('active');
+
+      const target = document.getElementById('tab-' + tabName);
+      if (target) target.style.display = 'block';
+
+      if (tabName === 'overview') refreshOverview();
+      if (tabName === 'repositories') refreshRepositories();
+      if (tabName === 'memory') refreshMemories();
+      if (tabName === 'security') refreshAuditLogs();
+    }
+
+    function showError(msg) {
+      const banner = document.getElementById('error-banner');
+      document.getElementById('error-message').innerText = msg;
+      banner.style.display = 'flex';
+    }
+
+    function dismissError() {
+      document.getElementById('error-banner').style.display = 'none';
+    }
+
+    async function apiFetch(endpoint, options = {}) {
+      try {
+        const res = await fetch(endpoint, options);
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error?.message || errData.detail || `HTTP ${res.status}`);
+        }
+        return await res.json();
+      } catch (err) {
+        showError(`API Error (${endpoint}): ${err.message}`);
+        throw err;
+      }
+    }
+
+    // Refresh Overview
+    async function refreshOverview() {
+      try {
+        const data = await apiFetch('/api/v1/dashboard/overview');
+        document.getElementById('status-text').innerText = data.system.status.toUpperCase();
+        document.getElementById('proto-version').innerText = data.system.protocol_version;
+        document.getElementById('env-mode').innerText = data.system.environment.toUpperCase();
+
+        document.getElementById('stat-symbols').innerText = (data.memory_store.total_symbols || 0).toLocaleString();
+        document.getElementById('stat-concepts').innerText = (data.memory_store.total_document_concepts || 0).toLocaleString();
+        document.getElementById('stat-memories').innerText = (data.memory_store.total_team_memories || 0).toLocaleString();
+
+        const hitRate = (data.cache_telemetry?.retrieval_cache?.hit_rate || 0) * 100;
+        document.getElementById('stat-cache-hit').innerText = hitRate.toFixed(1) + '%';
+        const savedCalls = data.cache_telemetry?.embedding_cache?.saved_api_calls || 0;
+        document.getElementById('stat-cache-sub').innerText = `Saved ${savedCalls} LLM embedding calls`;
+
+        // Cache Telemetry Table
+        const tbody = document.getElementById('cache-telemetry-body');
+        tbody.innerHTML = '';
+        const tiers = [
+          { name: 'Query Result Cache', stats: data.cache_telemetry?.retrieval_cache, savings: 'Full hybrid retrieval bypass' },
+          { name: 'Dense Embedding Cache', stats: data.cache_telemetry?.embedding_cache, savings: `${savedCalls} external API calls ($${(savedCalls * 0.0000004).toFixed(6)})` },
+          { name: 'Intent Classifier Cache', stats: data.cache_telemetry?.intent_cache, savings: 'Regex evaluation bypass' },
+          { name: 'Token Estimator Cache', stats: data.cache_telemetry?.token_estimation_cache, savings: 'Item markdown re-render bypass' }
+        ];
+
+        tiers.forEach(t => {
+          if (!t.stats) return;
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td style="font-weight: 600;">${t.name}</td>
+            <td style="font-family: var(--font-mono);">${t.stats.size || 0}</td>
+            <td style="font-family: var(--font-mono);">${t.stats.maxsize || 0}</td>
+            <td style="font-family: var(--font-mono);">${t.stats.hits || 0} / ${t.stats.misses || 0}</td>
+            <td><span class="badge ${t.stats.hit_rate > 0.5 ? 'badge-success' : 'badge-info'}">${((t.stats.hit_rate || 0) * 100).toFixed(1)}%</span></td>
+            <td>${t.stats.ttl_seconds ? t.stats.ttl_seconds + 's' : 'Permanent'}</td>
+            <td style="color: #34d399; font-size: 0.75rem;">${t.savings}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // Set canonical query
+    function setQuery(id, text) {
+      document.getElementById('query-input-field').value = text;
+      executeInteractiveQuery();
+    }
+
+    // Execute Interactive Query
+    async function executeInteractiveQuery() {
+      const q = document.getElementById('query-input-field').value.trim();
+      if (!q) return;
+
+      const budget = parseInt(document.getElementById('budget-range').value);
+      const mode = document.getElementById('aco-mode-select').value;
+      const btn = document.getElementById('run-query-btn');
+      const spinner = document.getElementById('btn-spinner');
+      const btnText = document.getElementById('btn-text');
+
+      btn.disabled = true;
+      spinner.style.display = 'block';
+      btnText.innerText = 'Orchestrating...';
+
+      try {
+        const payload = {
+          query: q,
+          repository_id: "synapse-core",
+          context_budget: budget,
+          optimization_mode: mode
+        };
+
+        const res = await apiFetch('/api/v1/dashboard/query', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        renderQueryResults(res);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        btn.disabled = false;
+        spinner.style.display = 'none';
+        btnText.innerText = 'Orchestrate Context';
+      }
+    }
+
+    function renderQueryResults(res) {
+      const container = document.getElementById('query-results-container');
+      container.style.display = 'block';
+
+      // Header pills
+      document.getElementById('res-intent-badge').innerText = `INTENT: ${res.intent.primary_intent.toUpperCase()} (${(res.intent.confidence * 100).toFixed(0)}%)`;
+      const isCached = res.timing?.from_cache;
+      const cacheBadge = document.getElementById('res-cache-badge');
+      if (isCached) {
+        cacheBadge.className = 'badge badge-success';
+        cacheBadge.innerText = '⚡ CACHED';
+      } else {
+        cacheBadge.className = 'badge badge-warning';
+        cacheBadge.innerText = '🔄 FRESH RUN';
+      }
+      document.getElementById('res-latency').innerText = `Elapsed: ${res.timing?.latency_ms || 0} ms`;
+
+      // Token economics
+      const tokens = res.tokens || {};
+      const kTokens = tokens.knowledge_context_tokens || 0;
+      const qTokens = tokens.query_tokens || 0;
+      const iTokens = tokens.instruction_tokens || 0;
+      const totalBudget = tokens.configured_budget || 1500;
+      const freeBudget = Math.max(0, totalBudget - kTokens);
+
+      const kPct = Math.min(100, (kTokens / totalBudget) * 100);
+      const freePct = Math.max(0, 100 - kPct);
+
+      document.getElementById('bar-knowledge').style.width = kPct + '%';
+      document.getElementById('bar-free').style.width = freePct + '%';
+
+      document.getElementById('budget-summary-text').innerText = `${kTokens} / ${totalBudget} context tokens (${tokens.budget_utilization_pct || 0}% utilization)`;
+      document.getElementById('leg-knowledge').innerText = `Knowledge: ${kTokens}`;
+      document.getElementById('leg-query').innerText = `Query: ${qTokens}`;
+      document.getElementById('leg-inst').innerText = `Instruction: ${iTokens}`;
+      document.getElementById('leg-free').innerText = `Free Budget: ${freeBudget}`;
+
+      // Prompt preview
+      document.getElementById('prompt-preview-text').innerText = res.assembled_context_preview || 'No context assembled.';
+
+      // Evidence list
+      const evidenceList = document.getElementById('evidence-list');
+      evidenceList.innerHTML = '';
+      const items = res.evidence_items || [];
+      document.getElementById('evidence-count-badge').innerText = `${items.length} items retained`;
+
+      items.forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'evidence-card';
+        const channels = (item.matched_channels || []).map(c => `<span class="channel-tag">${c}</span>`).join(' ');
+        card.innerHTML = `
+          <div class="evidence-head">
+            <span class="evidence-entity">${item.entity}</span>
+            <span class="badge badge-info">${item.type}</span>
+          </div>
+          <div class="evidence-location">${item.file_or_document || 'In-Memory / Team Memory'}</div>
+          ${item.traversal_path ? `<div class="graph-path">Graph Path: ${item.traversal_path}</div>` : ''}
+          <div class="evidence-meta">
+            <span>Score: <strong>${(item.score || 0).toFixed(4)}</strong></span>
+            <span>Confidence: <strong>${item.confidence ? (item.confidence * 100).toFixed(0) + '%' : 'N/A'}</strong></span>
+            <span>Channels: ${channels || '<span class="channel-tag">direct</span>'}</span>
+          </div>
+        `;
+        evidenceList.appendChild(card);
+      });
+    }
+
+    function toggleContextView() {
+      const box = document.getElementById('assembled-prompt-box');
+      box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    }
+
+    // Refresh Repositories
+    async function refreshRepositories() {
+      try {
+        const repos = await apiFetch('/api/v1/dashboard/repositories');
+        const tbody = document.getElementById('repositories-table-body');
+        tbody.innerHTML = '';
+        repos.forEach(r => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td style="font-weight: 700; color: #93c5fd;">${r.repository_id}</td>
+            <td><span class="badge badge-success">${r.status}</span></td>
+            <td style="font-family: var(--font-mono);">${r.symbol_count}</td>
+            <td style="font-family: var(--font-mono);">${r.concept_count}</td>
+            <td style="font-family: var(--font-mono);">${r.edge_count}</td>
+            <td style="font-family: var(--font-mono); color: #c084fc;">${r.latest_checkpoint_sha || 'N/A'}</td>
+            <td style="font-size: 0.75rem; color: var(--text-muted);">${r.last_updated}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+        // Jobs
+        const jobs = await apiFetch('/api/v1/dashboard/jobs');
+        const jobsTbody = document.getElementById('jobs-table-body');
+        jobsTbody.innerHTML = '';
+        jobs.forEach(j => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td style="font-family: var(--font-mono);">${j.checkpoint_id}</td>
+            <td><span class="badge ${j.is_full_rebuild ? 'badge-warning' : 'badge-info'}">${j.is_full_rebuild ? 'Full Rebuild' : 'Incremental'}</span></td>
+            <td>+${j.files_added || 0} / ~${j.files_modified || 0} / -${j.files_deleted || 0}</td>
+            <td style="font-family: var(--font-mono);">${j.symbols_extracted || 0}</td>
+            <td style="font-family: var(--font-mono);">${j.duration_ms} ms</td>
+            <td style="font-size: 0.75rem; color: var(--text-muted);">${j.timestamp}</td>
+          `;
+          jobsTbody.appendChild(tr);
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // Refresh Memories
+    async function refreshMemories() {
+      try {
+        const memories = await apiFetch('/api/v1/dashboard/memories');
+        const tbody = document.getElementById('memories-table-body');
+        tbody.innerHTML = '';
+        memories.forEach(m => {
+          const tr = document.createElement('tr');
+          const takeaways = (m.actionable_takeaways || []).join('; ');
+          const impacts = (m.impact_areas || []).map(a => `<code style="font-size: 0.75rem;">${a}</code>`).join(' ');
+          tr.innerHTML = `
+            <td style="font-weight: 600;">${m.title}</td>
+            <td><span class="badge badge-info">${m.category}</span></td>
+            <td>${m.scope}</td>
+            <td style="color: #93c5fd;">${m.author_id}</td>
+            <td>${impacts || 'N/A'}</td>
+            <td style="font-size: 0.75rem; color: var(--text-muted);">${takeaways || 'N/A'}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+        // Sessions
+        const sessions = await apiFetch('/api/v1/dashboard/sessions');
+        const sTbody = document.getElementById('sessions-table-body');
+        sTbody.innerHTML = '';
+        sessions.forEach(s => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td style="font-family: var(--font-mono);">${s.id}</td>
+            <td><span class="badge badge-info">${s.client_type}</span></td>
+            <td><span class="badge ${s.status === 'active' ? 'badge-success' : 'badge-warning'}">${s.status}</span></td>
+            <td>${s.repository_id}</td>
+            <td style="font-size: 0.75rem; color: var(--text-muted);">${s.created_at}</td>
+            <td style="font-family: var(--font-mono);">${s.context_queries_count || 0}</td>
+          `;
+          sTbody.appendChild(tr);
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // Refresh Audit Logs
+    async function refreshAuditLogs() {
+      try {
+        const events = await apiFetch('/api/v1/security/audit');
+        const tbody = document.getElementById('audit-table-body');
+        tbody.innerHTML = '';
+        events.forEach(e => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td style="font-size: 0.75rem; color: var(--text-muted);">${e.timestamp}</td>
+            <td><span class="badge badge-info">${e.event_type}</span></td>
+            <td style="font-family: var(--font-mono);">${e.principal_id || 'anonymous'}</td>
+            <td>${e.tenant_id || 'default'}</td>
+            <td style="font-family: var(--font-mono);">${e.target_resource || 'N/A'}</td>
+            <td><span class="badge ${e.decision === 'grant' || e.decision === 'allow' ? 'badge-success' : 'badge-danger'}">${e.decision || 'LOG'}</span></td>
+          `;
+          tbody.appendChild(tr);
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // Initial load
+    document.addEventListener('DOMContentLoaded', () => {
+      refreshOverview();
+    });
+  </script>
+</body>
+</html>

@@ -846,6 +846,7 @@ class AdaptiveContextOrchestrator:
             "token_budget": max_tokens,
             "estimated_tokens": estimated_tokens,
             "channel_stats": query_response.retrieval_stats,
+            "from_cache": bool(query_response.retrieval_stats.get("from_cache", False)),
             "token_optimization": token_opt_dict,
         }
 
