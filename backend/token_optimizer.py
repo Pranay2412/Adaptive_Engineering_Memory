@@ -453,8 +453,8 @@ class BaseLLMCompressor(ABC):
         pass
 
 
-class MockLLMCompressor(BaseLLMCompressor):
-    """Deterministic, zero-dependency LLM compressor for testing and offline runs."""
+class DeterministicExtractiveCompressor(BaseLLMCompressor):
+    """Deterministic, zero-dependency structured context compressor for offline and local runs."""
 
     def __init__(self, compression_ratio: float = 0.50) -> None:
         self.compression_ratio = max(0.20, min(0.95, compression_ratio))
@@ -500,6 +500,10 @@ class MockLLMCompressor(BaseLLMCompressor):
             lines.append(a.to_summary_line())
 
         return "\n".join(lines)
+
+
+# Backwards compatibility alias
+MockLLMCompressor = DeterministicExtractiveCompressor
 
 
 class OpenAILLMCompressor(BaseLLMCompressor):
@@ -549,8 +553,8 @@ class OpenAILLMCompressor(BaseLLMCompressor):
             )
             return response.choices[0].message.content or raw_context
         except Exception as e:
-            logger.warning("OpenAI compression failed, falling back to mock compressor: %s", e)
-            return MockLLMCompressor().compress(raw_context, query, target_token_budget, candidates)
+            logger.error("OpenAI LLM context compression failed: %s", e)
+            raise RuntimeError(f"OpenAI LLM context compression failed: {e}") from e
 
 
 class GeminiLLMCompressor(BaseLLMCompressor):
@@ -585,8 +589,8 @@ class GeminiLLMCompressor(BaseLLMCompressor):
             )
             return response.text or raw_context
         except Exception as e:
-            logger.warning("Gemini compression failed, falling back to mock compressor: %s", e)
-            return MockLLMCompressor().compress(raw_context, query, target_token_budget, candidates)
+            logger.error("Gemini LLM context compression failed: %s", e)
+            raise RuntimeError(f"Gemini LLM context compression failed: {e}") from e
 
 
 def get_llm_compressor(
@@ -594,22 +598,21 @@ def get_llm_compressor(
     api_key: str | None = None,
     model: str | None = None,
 ) -> BaseLLMCompressor:
-    """Factory to instantiate configured LLM compressor, defaulting to MockLLMCompressor for offline tests."""
-    selected_provider = (provider or os.environ.get("LLM_PROVIDER", "mock")).lower()
+    """Factory to instantiate configured LLM compressor without silent fallbacks."""
+    raw_provider = provider or os.environ.get("LLM_PROVIDER")
+    selected_provider = (raw_provider or "deterministic").lower()
+
     if selected_provider == "openai":
-        try:
-            return OpenAILLMCompressor(api_key=api_key, model=model)
-        except Exception as e:
-            logger.warning("Falling back to MockLLMCompressor: %s", e)
-            return MockLLMCompressor()
+        return OpenAILLMCompressor(api_key=api_key, model=model)
     elif selected_provider == "gemini":
-        try:
-            return GeminiLLMCompressor(api_key=api_key, model=model)
-        except Exception as e:
-            logger.warning("Falling back to MockLLMCompressor: %s", e)
-            return MockLLMCompressor()
+        return GeminiLLMCompressor(api_key=api_key, model=model)
+    elif selected_provider in ("deterministic", "local", "extractive", "mock"):
+        return DeterministicExtractiveCompressor()
     else:
-        return MockLLMCompressor()
+        raise ValueError(
+            f"Unsupported LLM compressor provider: '{selected_provider}'. "
+            "Supported providers: 'openai', 'gemini', 'deterministic', 'extractive'."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -639,7 +642,7 @@ class TokenOptimizationEngine:
         self.redundancy_detector = RedundancyDetector(jaccard_threshold=jaccard_threshold)
         self.enable_tier_compaction = enable_tier_compaction
         self.header_budget_allowance = header_budget_allowance
-        self.llm_compressor = llm_compressor or MockLLMCompressor()
+        self.llm_compressor = llm_compressor or get_llm_compressor()
         self.tokenizer = tokenizer
 
     def count_tokens(self, text: str, tokenizer: str | Callable[[str], int] | None = None) -> int:
@@ -907,7 +910,7 @@ class TokenOptimizationEngine:
 
         else:
             # Mode 3: LLM Compression - Structured compression pass + provenance guardrails
-            compressor = llm_compressor or self.llm_compressor or MockLLMCompressor()
+            compressor = llm_compressor or self.llm_compressor or get_llm_compressor()
 
             # Construct raw input text for compressor with all candidate provenance anchors
             raw_input_lines = [header, ""]

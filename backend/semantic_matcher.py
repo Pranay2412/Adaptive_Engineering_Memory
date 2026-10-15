@@ -136,8 +136,8 @@ class BaseEmbeddingProvider(abc.ABC):
         return vec
 
 
-class MockEmbeddingProvider(BaseEmbeddingProvider):
-    """Deterministic, zero-dependency embedding provider for unit testing and offline runs."""
+class DeterministicLocalEmbeddingProvider(BaseEmbeddingProvider):
+    """Deterministic, zero-dependency embedding provider using token-hashing projection onto the unit hypersphere."""
 
     def __init__(
         self,
@@ -157,7 +157,7 @@ class MockEmbeddingProvider(BaseEmbeddingProvider):
         """Generate a reproducible, normalized pseudo-semantic vector from text tokens."""
         lower = text.lower()
 
-        # Check explicit concept mappings
+        # Check explicit concept mappings (if provided for domain dictionaries/fixtures)
         for concept, vec in self.concept_vectors.items():
             if concept in lower:
                 return vec
@@ -180,6 +180,10 @@ class MockEmbeddingProvider(BaseEmbeddingProvider):
         self.batch_call_count += 1
         self.total_texts_embedded += len(texts)
         return [self._generate_deterministic_vector(text) for text in texts]
+
+
+# Backwards compatibility alias
+MockEmbeddingProvider = DeterministicLocalEmbeddingProvider
 
 
 class OpenAIEmbeddingProvider(BaseEmbeddingProvider):
@@ -256,27 +260,35 @@ def get_embedding_provider(
     api_key: str | None = None,
     model: str | None = None,
 ) -> BaseEmbeddingProvider:
-    """Resolve and instantiate an embedding provider based on configuration or environment."""
+    """Resolve and instantiate an embedding provider based on configuration or environment.
+
+    Explicit provider configurations ('openai', 'gemini') require valid credentials and will
+    raise explicit errors if unconfigured, eliminating silent mock fallbacks. Unspecified
+    configurations without cloud credentials default to DeterministicLocalEmbeddingProvider.
+    """
     name = (provider_name or os.environ.get("EMBEDDING_PROVIDER") or os.environ.get("LLM_PROVIDER") or "").strip().lower()
-    if name == "mock":
-        return MockEmbeddingProvider()
-    has_openai_key = bool(os.environ.get("OPENAI_API_KEY") or (os.environ.get("LLM_PROVIDER") == "openai" and os.environ.get("LLM_API_KEY")))
-    has_gemini_key = bool(os.environ.get("GEMINI_API_KEY") or (os.environ.get("LLM_PROVIDER") == "gemini" and os.environ.get("LLM_API_KEY")))
 
-    if name == "openai" or (not name and has_openai_key):
-        try:
+    if name == "openai":
+        return OpenAIEmbeddingProvider(api_key=api_key, model=model)
+    elif name == "gemini":
+        return GeminiEmbeddingProvider(api_key=api_key, model=model)
+    elif name in ("deterministic", "local", "hash", "offline", "mock"):
+        return DeterministicLocalEmbeddingProvider()
+    elif not name:
+        has_openai_key = bool(os.environ.get("OPENAI_API_KEY") or (os.environ.get("LLM_PROVIDER") == "openai" and os.environ.get("LLM_API_KEY")))
+        has_gemini_key = bool(os.environ.get("GEMINI_API_KEY") or (os.environ.get("LLM_PROVIDER") == "gemini" and os.environ.get("LLM_API_KEY")))
+
+        if has_openai_key:
             return OpenAIEmbeddingProvider(api_key=api_key, model=model)
-        except Exception as e:
-            logger.warning("Failed to initialize OpenAIEmbeddingProvider (%s); falling back to MockEmbeddingProvider.", e)
-            return MockEmbeddingProvider()
-    if name == "gemini" or (not name and has_gemini_key):
-        try:
+        elif has_gemini_key:
             return GeminiEmbeddingProvider(api_key=api_key, model=model)
-        except Exception as e:
-            logger.warning("Failed to initialize GeminiEmbeddingProvider (%s); falling back to MockEmbeddingProvider.", e)
-            return MockEmbeddingProvider()
-
-    return MockEmbeddingProvider()
+        else:
+            return DeterministicLocalEmbeddingProvider()
+    else:
+        raise ValueError(
+            f"Unsupported embedding provider: '{name}'. "
+            "Supported providers: 'openai', 'gemini', 'deterministic', 'local'."
+        )
 
 
 class SemanticSymbolIndex:

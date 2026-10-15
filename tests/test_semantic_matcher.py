@@ -188,6 +188,20 @@ class TestSemanticMatcher(unittest.TestCase):
             fallback_p = get_embedding_provider()
             self.assertIsInstance(fallback_p, MockEmbeddingProvider)
 
+        # 5. Explicit openai provider without credentials raises EnvironmentError (no silent fallback)
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(EnvironmentError):
+                get_embedding_provider(provider_name="openai")
+
+        # 6. Explicit gemini provider without credentials raises EnvironmentError (no silent fallback)
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(EnvironmentError):
+                get_embedding_provider(provider_name="gemini")
+
+        # 7. Unsupported provider raises ValueError
+        with self.assertRaises(ValueError):
+            get_embedding_provider(provider_name="unsupported_dummy")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,7 @@
-"""Unit tests for the Token Optimization Engine for Synapse."""
-
+import os
 import unittest
+from unittest.mock import patch
+
 from backend.models import (
     HybridRetrievalResult,
     RelationshipHop,
@@ -614,5 +615,51 @@ class TestCompareOptimizationModes(unittest.TestCase):
         self.assertEqual(len(rebuilt.comparison_table), 3)
 
 
+
+class TestLLMCompressorFactoryAndNoSilentFallbacks(unittest.TestCase):
+    """Test suite ensuring no silent fallbacks, fake data, or unhandled mocks in LLM compression."""
+
+    def test_factory_returns_deterministic_extractive_compressor(self):
+        from backend.token_optimizer import DeterministicExtractiveCompressor, get_llm_compressor
+        comp = get_llm_compressor("deterministic")
+        self.assertIsInstance(comp, DeterministicExtractiveCompressor)
+
+    def test_factory_openai_missing_credentials_raises_error(self):
+        from backend.token_optimizer import get_llm_compressor
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(EnvironmentError):
+                get_llm_compressor("openai")
+
+    def test_factory_gemini_missing_credentials_raises_error(self):
+        from backend.token_optimizer import get_llm_compressor
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(EnvironmentError):
+                get_llm_compressor("gemini")
+
+    def test_factory_unsupported_provider_raises_value_error(self):
+        from backend.token_optimizer import get_llm_compressor
+        with self.assertRaises(ValueError):
+            get_llm_compressor("nonexistent_cloud_llm")
+
+    def test_openai_compressor_propagates_api_error_without_silent_fallback(self):
+        from backend.token_optimizer import OpenAILLMCompressor
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-dummy-test-key"}):
+            compressor = OpenAILLMCompressor()
+            with patch.object(compressor.client.chat.completions, "create", side_effect=Exception("API Connection Refused")):
+                with self.assertRaises(RuntimeError) as ctx:
+                    compressor.compress("raw context", "test query", 200, [])
+                self.assertIn("OpenAI LLM context compression failed", str(ctx.exception))
+
+    def test_gemini_compressor_propagates_api_error_without_silent_fallback(self):
+        from backend.token_optimizer import GeminiLLMCompressor
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "dummy-gemini-key"}):
+            compressor = GeminiLLMCompressor()
+            with patch("google.genai.Client", side_effect=Exception("Quota Exceeded")):
+                with self.assertRaises(RuntimeError) as ctx:
+                    compressor.compress("raw context", "test query", 200, [])
+                self.assertIn("Gemini LLM context compression failed", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
+

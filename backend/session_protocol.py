@@ -1287,46 +1287,43 @@ class SessionProtocolEngine:
             repository_id=session.repository_id,
         )
 
-        # If live orchestrator is supplied, delegate; otherwise use reference packing
-        if self.orchestrator:
-            orch_ctx = self.orchestrator.orchestrate(
-                query=clean_query,
-                user_id=principal.principal_id,
-                repository_id=session.repository_id,
-                max_tokens=request.max_tokens,
-                optimization_mode=request.optimization_mode,
+        # Always delegate to real AdaptiveContextOrchestrator
+        if self.orchestrator is None:
+            from .orchestrator import AdaptiveContextOrchestrator
+            self.orchestrator = AdaptiveContextOrchestrator(
+                session_memory_service=self.session_service,
             )
-            intent = (
-                orch_ctx.intent.primary_intent.value
-                if hasattr(orch_ctx.intent, "primary_intent")
-                else str(orch_ctx.intent)
-            )
-            formatted = SecretRedactor.redact(
-                getattr(orch_ctx, "context_text", getattr(orch_ctx, "formatted_context", ""))
-            )
-            used_tokens = getattr(orch_ctx, "estimated_tokens", getattr(orch_ctx, "tokens_used", 0))
-            breakdown: dict[str, int] = {}
-            for r in getattr(orch_ctx, "retrieved_results", []):
-                cat = getattr(r, "type", "code")
-                breakdown[cat] = breakdown.get(cat, 0) + 1
-            prov = [
-                {
-                    "source": getattr(r, "source", "unknown"),
-                    "repository": getattr(r, "repository", session.repository_id),
-                    "confidence": getattr(r, "confidence", 1.0),
-                }
-                for r in getattr(orch_ctx, "retrieved_results", [])
-            ]
-            meta = getattr(orch_ctx, "retrieval_metadata", {})
-            latency = float(meta.get("latency_ms", 1.0) if isinstance(meta, dict) else 1.0)
-        else:
-            # Fallback mock context if orchestrator not wired in standalone tests
-            intent = "implementation"
-            formatted = f"Context for {clean_query} in {session.repository_id}"
-            used_tokens = len(formatted.split())
-            breakdown = {"code": 1}
-            prov = [{"source": "mock_retrieval", "repository": session.repository_id, "confidence": 1.0}]
-            latency = 1.0
+
+        orch_ctx = self.orchestrator.orchestrate(
+            query=clean_query,
+            user_id=principal.principal_id,
+            repository_id=session.repository_id,
+            max_tokens=request.max_tokens,
+            optimization_mode=request.optimization_mode,
+        )
+        intent = (
+            orch_ctx.intent.primary_intent.value
+            if hasattr(orch_ctx.intent, "primary_intent")
+            else str(orch_ctx.intent)
+        )
+        formatted = SecretRedactor.redact(
+            getattr(orch_ctx, "context_text", getattr(orch_ctx, "formatted_context", ""))
+        )
+        used_tokens = getattr(orch_ctx, "estimated_tokens", getattr(orch_ctx, "tokens_used", 0))
+        breakdown: dict[str, int] = {}
+        for r in getattr(orch_ctx, "retrieved_results", []):
+            cat = getattr(r, "type", "code")
+            breakdown[cat] = breakdown.get(cat, 0) + 1
+        prov = [
+            {
+                "source": getattr(r, "source", "unknown"),
+                "repository": getattr(r, "repository", session.repository_id),
+                "confidence": getattr(r, "confidence", 1.0),
+            }
+            for r in getattr(orch_ctx, "retrieved_results", [])
+        ]
+        meta = getattr(orch_ctx, "retrieval_metadata", {})
+        latency = float(meta.get("latency_ms", 1.0) if isinstance(meta, dict) else 1.0)
 
         utilization = round((used_tokens / request.max_tokens) * 100.0, 2)
 

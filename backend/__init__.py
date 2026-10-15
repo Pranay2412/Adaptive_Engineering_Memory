@@ -137,6 +137,7 @@ from .token_optimizer import (
     BaseLLMCompressor,
     CandidateProvenanceAnchor,
     ContextTier,
+    DeterministicExtractiveCompressor,
     GeminiLLMCompressor,
     MockLLMCompressor,
     OpenAILLMCompressor,
@@ -192,6 +193,7 @@ from .retrieval import (
 )
 from .semantic_matcher import (
     BaseEmbeddingProvider,
+    DeterministicLocalEmbeddingProvider,
     GeminiEmbeddingProvider,
     MockEmbeddingProvider,
     OpenAIEmbeddingProvider,
@@ -219,6 +221,8 @@ __all__ = [
     "ContextTier",
     "DEFAULT_INTENT_STRATEGIES",
     "DEFAULT_SOURCE_RELIABILITY_MAP",
+    "DeterministicExtractiveCompressor",
+    "DeterministicLocalEmbeddingProvider",
     "Document",
     "DocumentEntity",
     "EngineeringDecision",

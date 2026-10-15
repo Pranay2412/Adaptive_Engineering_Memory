@@ -318,6 +318,9 @@ class RuleBasedIntentClassifier(BaseIntentClassifier):
         strategy = self.strategies.get(top_intent, self.strategies[QueryIntent.EXPLANATION])
         selected_sources = strategy.get("preferred_sources", [])
 
+        metadata = dict(context or {})
+        metadata["query"] = clean_query
+
         res = IntentAnalysisResult(
             primary_intent=top_intent,
             confidence=round(confidence, 4),
@@ -326,6 +329,7 @@ class RuleBasedIntentClassifier(BaseIntentClassifier):
             reasoning=reasoning,
             selected_sources=selected_sources,
             retrieval_strategy=dict(strategy),
+            metadata=metadata,
         )
 
         if not context:
@@ -575,6 +579,9 @@ class AdaptiveContextPacker(BaseContextPacker):
             f"### Engineering Memory Context (Intent: {intent})",
             f"> Confidence: {intent_result.confidence:.2f} | Strategy: {intent_result.reasoning}",
         ]
+        query_text = intent_result.metadata.get("query")
+        if query_text:
+            header_lines.append(f"> Query: {query_text}")
         if intent_result.secondary_intents:
             sec_str = ", ".join(f"{si[0].value} ({si[1]:.2f})" for si in intent_result.secondary_intents)
             header_lines.append(f"> Secondary Intents: {sec_str}")

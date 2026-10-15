@@ -413,26 +413,39 @@ class HybridRetrievalService:
         # If in-memory items are passed, ensure they are also scored lexically
         if symbols:
             for s in symbols:
-                # Simple in-memory token scoring fallback if not found in DB
                 if s.id not in lexical_map:
                     s_lower = s.name.lower()
-                    if clean_query.lower() in s_lower:
-                        lexical_map[s.id] = (s, 0.95)
+                    if clean_query.lower() == s_lower:
+                        lexical_map[s.id] = (s, 1.0)
                         candidate_objects[s.id] = s
-                    elif any(t in s_lower for t in query_terms):
-                        lexical_map[s.id] = (s, 0.75)
+                    elif clean_query.lower() in s_lower:
+                        ratio = len(clean_query) / max(1, len(s_lower))
+                        lexical_map[s.id] = (s, round(0.85 + 0.15 * ratio, 4))
                         candidate_objects[s.id] = s
+                    elif query_terms:
+                        matches = sum(1 for t in query_terms if t in s_lower)
+                        if matches > 0:
+                            lex_score = round(0.50 + 0.40 * (matches / len(query_terms)), 4)
+                            lexical_map[s.id] = (s, lex_score)
+                            candidate_objects[s.id] = s
 
         if entities:
             for e in entities:
                 if e.id not in lexical_map:
                     e_lower = e.name.lower()
-                    if clean_query.lower() in e_lower:
-                        lexical_map[e.id] = (e, 0.95)
+                    if clean_query.lower() == e_lower:
+                        lexical_map[e.id] = (e, 1.0)
                         candidate_objects[e.id] = e
-                    elif any(t in e_lower for t in query_terms):
-                        lexical_map[e.id] = (e, 0.75)
+                    elif clean_query.lower() in e_lower:
+                        ratio = len(clean_query) / max(1, len(e_lower))
+                        lexical_map[e.id] = (e, round(0.85 + 0.15 * ratio, 4))
                         candidate_objects[e.id] = e
+                    elif query_terms:
+                        matches = sum(1 for t in query_terms if t in e_lower)
+                        if matches > 0:
+                            lex_score = round(0.50 + 0.40 * (matches / len(query_terms)), 4)
+                            lexical_map[e.id] = (e, lex_score)
+                            candidate_objects[e.id] = e
 
         # ---------------------------------------------------------
         # 2. Semantic / Dense Vector Search Channel
