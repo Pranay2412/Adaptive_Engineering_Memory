@@ -735,8 +735,11 @@ and artifacts.
                                                   automated test (tests/test_demo_e2e.py);
                                                   full test suite verified (426 passed)
 
-  Phase 21 --- Research   Planned                 Report and reproducible
-  docs                                            results
+  Phase 21 --- Research   Complete                Comprehensive research report (docs/research/research_and_technical_report.md);
+  docs                                            all 18 topics covered; verified against frozen baseline,
+                                                  ablation, and E2E demo artifacts;
+                                                  automated test (tests/test_research_documentation.py);
+                                                  full test suite verified (430 passed)
 
   Phase 22 --- Final      Planned                 Completed audit checklist
   audit                                           
@@ -1003,6 +1006,11 @@ Mandatory rules:
 > State that preliminary TC1 reduced tokens but was slower on average. Do not generalize from small samples. Report failed/missing runs; distinguish exact counts from estimates; include neutral/negative findings. Quantitative claims must be generated from artifacts. Cite external claims if introduced.
 
 **Acceptance:** report is reproducible and every quantitative claim maps to evidence.
+
+**Status: COMPLETE**
+- **Comprehensive Research Report:** `docs/research/research_and_technical_report.md` covering all 18 topics: problem statement, related work/gap analysis, platform architecture, structural & semantic memory, hybrid retrieval, ACO algorithm, session/team memory, environment specs, evaluation datasets/rubrics, TC1 baseline comparison, corrected TC2 budget sweep, component ablation (165 trials), latency/cost/quality trade-offs, security/privacy, threats to validity, reproduction guide, and authoritative artifact inventory.
+- **Empirical Mapping:** All quantitative claims strictly map to underlying benchmark artifacts (TC1: 43.22% context token reduction, 4.20/5.0 quality, +65.2% latency disclosure; TC2: 0/75 budget violations; Ablation: 165 trials; Demo E2E: 83.21% token reduction).
+- **Automated Verification:** `tests/test_research_documentation.py` verifying all 18 topics, artifact existence, and numeric claims (4 passed in 0.03s; 430 total tests passing).
 
 ## A25. Phase 22 — Final release audit
 
