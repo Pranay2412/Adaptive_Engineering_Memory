@@ -728,7 +728,12 @@ and artifacts.
                                                   tests/test_security_hardening.py (8 passed);
                                                   full test suite verified (425 passed)
 
-  Phase 20 --- E2E demo   Planned                 Reproducible demo
+  Phase 20 --- E2E demo   Complete                Reproducible demo script (scripts/demo_e2e.py);
+                                                  synthetic shareable fixtures (fixtures/demo_repo/);
+                                                  docs/demo/e2e_demo_guide.md;
+                                                  raw metrics (benchmarks/results/demo_e2e_results.json);
+                                                  automated test (tests/test_demo_e2e.py);
+                                                  full test suite verified (426 passed)
 
   Phase 21 --- Research   Planned                 Report and reproducible
   docs                                            results
@@ -983,6 +988,13 @@ Mandatory rules:
 > Provide demo script, exact setup/cleanup, raw metrics, commit/benchmark version, and synthetic-data labels. Make runs deterministic where possible; no credentials embedded and no hidden manual steps. Recording is optional unless requested.
 
 **Acceptance:** demo works from documented setup and every displayed claim matches recorded evidence.
+
+**Status: COMPLETE**
+- **Shareable Synthetic Fixtures:** `fixtures/demo_repo/` modeling modular microservice (`auth/service.py`, `auth/token_manager.py`, `billing/engine.py`, `docs/architecture/auth_overview.md`, `docs/troubleshooting/token_errors.md`, `README.md`) with explicit synthetic data labeling and no real credentials.
+- **Reproducible Demo Script:** `scripts/demo_e2e.py` covering all 8 stages from clean setup (fresh migrations, AST/spec ingestion, structural query, debugging query, ADR persistence, cross-client continuity, Section 7 token budgeting, empirical baseline comparison with 83.21% token reduction, and multi-boundary security rejection).
+- **Automated Verification:** `tests/test_demo_e2e.py` integrated into CI (426 total tests passing).
+- **Execution Runbook:** `docs/demo/e2e_demo_guide.md` with complete architecture diagrams, reproduction steps, and artifact schema.
+- **Raw Metrics Artifact:** `benchmarks/results/demo_e2e_results.json` recording commit hash, timestamps, and stage assertions.
 
 ## A24. Phase 21 — Research and technical documentation
 
