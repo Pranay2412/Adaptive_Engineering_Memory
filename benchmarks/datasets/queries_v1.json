@@ -1,0 +1,110 @@
+{
+  "version": "1.0.0",
+  "name": "synapse-core-engineering-queries-v1",
+  "description": "Canonical versioned benchmark query set covering 5 core software engineering query intents for FYP codebase.",
+  "created_at": "2026-10-15T00:00:00Z",
+  "queries": [
+    {
+      "query_id": "SYN-Q01",
+      "category": "structural",
+      "query": "What modules import models.py?",
+      "expected_evidence": [
+        "backend/db_loader.py",
+        "backend/bridge.py",
+        "backend/hybrid_retrieval.py",
+        "backend/orchestrator.py",
+        "backend/session_memory.py",
+        "backend/team_memory.py",
+        "tests/test_schema.py"
+      ],
+      "reference_answer": "In the Synapse architecture, models.py defines core domain entities (CodeSymbol, DocumentEntity, Memory, OptimizationMode, OrchestratedContext). Key internal modules importing models.py include backend/db_loader.py (graph persistence), backend/bridge.py (cross-linking), backend/hybrid_retrieval.py (retrieval types), backend/orchestrator.py (context packing), backend/session_memory.py, backend/team_memory.py, and unit test suites.",
+      "scoring_rubric": {
+        "5": "Identifies 4 or more actual importing modules with correct file paths and explains their role.",
+        "4": "Identifies 3 importing modules accurately.",
+        "3": "Identifies 2 importing modules accurately.",
+        "2": "Identifies 1 module or mentions generic concept without exact paths.",
+        "1": "Evasive answer, hallucinated module names, or disclaimer claiming lack of context."
+      }
+    },
+    {
+      "query_id": "SYN-Q02",
+      "category": "implementation",
+      "query": "How does authentication work with JWT?",
+      "expected_evidence": [
+        "RS256 asymmetric signing",
+        "Private key rotation",
+        "Authorization header Bearer token",
+        "JWT Header, Payload, Signature verification",
+        "Clock skew leeway (60s)"
+      ],
+      "reference_answer": "Synapse uses asymmetric RS256 algorithm for signing JWT tokens rather than shared symmetric secrets (HS256) to eliminate secret leakage across services. Tokens carry principal ID, tenant ID, roles, and allowed repositories. The validator extracts Bearer tokens from the HTTP Authorization header, verifies signature against the public JWKS with key rotation, and applies a 60-second clock skew leeway to prevent false rejections.",
+      "scoring_rubric": {
+        "5": "Explains RS256 asymmetric signing, claims payload (principal/tenant/roles), Bearer header extraction, and clock skew handling.",
+        "4": "Explains RS256, claims structure, and verification without mentioning clock skew.",
+        "3": "Explains basic JWT verification but omits RS256 or key architectural claims.",
+        "2": "Generic explanation of JWT without Synapse-specific architecture details.",
+        "1": "Incorrect token mechanism, evasive disclaimer, or hallucinated auth flow."
+      }
+    },
+    {
+      "query_id": "SYN-Q03",
+      "category": "dependency",
+      "query": "Which components call the authentication service?",
+      "expected_evidence": [
+        "FastAPI middleware / dependency injection (get_current_principal)",
+        "backend/server.py",
+        "backend/mcp_server.py (resolve_mcp_principal)",
+        "backend/session_protocol.py (SessionProtocolEngine)",
+        "Security audit logger"
+      ],
+      "reference_answer": "Authentication is consumed at multiple entry points: backend/server.py routes via FastAPI dependency injection (get_current_principal), backend/mcp_server.py via resolve_mcp_principal for MCP tool calls, backend/session_protocol.py for protocol-level role and repository authorization checks, and test suites verifying RBAC enforcement.",
+      "scoring_rubric": {
+        "5": "Accurately identifies API router middleware, MCP server auth resolver, and protocol engine authorization.",
+        "4": "Identifies at least 2 distinct components (e.g., API routes and MCP server).",
+        "3": "Identifies 1 concrete calling component accurately.",
+        "2": "Mentions generic callers without file or function references.",
+        "1": "Evasive disclaimer or completely hallucinated calling components."
+      }
+    },
+    {
+      "query_id": "SYN-Q04",
+      "category": "debugging",
+      "query": "Where could JWT verification fail and what code is involved?",
+      "expected_evidence": [
+        "Clock skew between servers without leeway",
+        "Token expiration (exp claim passed)",
+        "Signature mismatch (tampered token or incorrect key)",
+        "Malformed Authorization header or missing Bearer prefix",
+        "backend/security.py (TokenService.verify_token)"
+      ],
+      "reference_answer": "JWT verification in backend/security.py can fail due to: (1) Clock skew across distributed nodes if leeway is missing or exceeded; (2) Token expiration when current timestamp exceeds the 'exp' claim; (3) Signature mismatch if the token was signed with an unrotated key or tampered with; (4) Malformed header without the 'Bearer ' prefix; and (5) Missing or invalid tenant/principal claims. In staging, a known root cause was clock skew, resolved by adding a 60s validation leeway.",
+      "scoring_rubric": {
+        "5": "Details multiple failure modes (expiration, signature mismatch, clock skew, malformed format) and identifies backend/security.py / TokenService.",
+        "4": "Identifies 3 failure modes with code references.",
+        "3": "Identifies 2 failure modes with basic reasoning.",
+        "2": "Identifies only 1 failure mode generically.",
+        "1": "Evasive answer or failure to identify any realistic failure mode."
+      }
+    },
+    {
+      "query_id": "SYN-Q05",
+      "category": "architecture",
+      "query": "Why was RS256 chosen for authentication?",
+      "expected_evidence": [
+        "Asymmetric key cryptography (public/private key separation)",
+        "Eliminates shared symmetric secrets across microservices/workers",
+        "Public JWKS distribution with TTL",
+        "Private key isolation in secure vault",
+        "mem-auth-rs256 architectural decision record"
+      ],
+      "reference_answer": "As recorded in architectural decision mem-auth-rs256, RS256 was selected over HS256 because it uses asymmetric public/private key pairs. This ensures only the auth authority possesses the private signing key, while downstream microservices, background workers, and client extensions verify tokens using the public key (JWKS) without risking symmetric secret leakage across distributed nodes.",
+      "scoring_rubric": {
+        "5": "Cites public/private key asymmetry, prevention of shared secret exposure, and architectural decision context.",
+        "4": "Explains asymmetric vs symmetric trade-off clearly.",
+        "3": "Explains basic security advantages of public key signing.",
+        "2": "Generic statements about security without technical rationale.",
+        "1": "Incorrect security reasoning, evasive disclaimer, or hallucinated claims."
+      }
+    }
+  ]
+}

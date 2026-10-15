@@ -681,8 +681,11 @@ and artifacts.
                                                   tests/test_mcp_production.py (11 passed);
                                                   tests/test_mcp_adapter.py (9 passed)
 
-  Phase 13 --- Evaluation Planned / audit         Reproducible runner
-  framework               existing scripts        
+  Phase 13 --- Evaluation Complete (15-10-2026)   benchmarks/datasets/queries_v1.json;
+  framework                                       benchmarks/eval_framework.py;
+                                                  benchmarks/run_evaluation.py;
+                                                  docs/experiments/evaluation_framework.md;
+                                                  tests/test_evaluation_framework.py (9 passed)
 
   Phase 14 --- Ablation   Planned                 Ablation report
 
