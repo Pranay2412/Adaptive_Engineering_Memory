@@ -1,8 +1,8 @@
 {
   "benchmark_version": "1.0.0",
-  "git_commit": "ddb10015591fb4b62d7e9af5612ce5d293712f21",
-  "git_commit_short": "ddb10015",
-  "timestamp": "2026-10-15T10:01:12.562843+00:00",
+  "git_commit": "30303fc36abef4fc8c8a8d89a314abc4a1794b2c",
+  "git_commit_short": "30303fc3",
+  "timestamp": "2026-10-15T13:08:19.381712+00:00",
   "synthetic_data_labeled": true,
   "stages": {
     "ingestion": {
@@ -11,7 +11,7 @@
       "symbols_count": 17,
       "entities_count": 8,
       "edges_count": 30,
-      "latency_ms": 361.85
+      "latency_ms": 1247.85
     },
     "structural_query": {
       "status": "PASS",
@@ -19,7 +19,7 @@
       "intent": "architecture",
       "confidence": 0.8,
       "retrieved_count": 10,
-      "latency_ms": 10.02
+      "latency_ms": 45.26
     },
     "debugging_query": {
       "status": "PASS",
@@ -27,42 +27,42 @@
       "intent": "debugging",
       "confidence": 0.95,
       "retrieved_count": 11,
-      "latency_ms": 9.59
+      "latency_ms": 43.51
     },
     "persist_decision": {
       "status": "PASS",
-      "session_id": "sess_c4473a98f6ae",
-      "decision_id": "dec_0ebe70fdaa",
+      "session_id": "sess_07b7a2aba3e2",
+      "decision_id": "dec_839d10af87",
       "title": "ADR-004: Token Expiration and Clock Skew Grace Period",
       "scope": "repository"
     },
     "cross_client_continuity": {
       "status": "PASS",
-      "session_client_1": "sess_c4473a98f6ae",
-      "session_client_2": "sess_6692c7f92283",
+      "session_client_1": "sess_07b7a2aba3e2",
+      "session_client_2": "sess_a063cf5cf6a5",
       "items_packed": 1,
       "adr_found": true,
-      "tokens_used": 161,
-      "latency_ms": 11.31
+      "tokens_used": 178,
+      "latency_ms": 57.02
     },
     "token_accounting": {
       "status": "PASS",
       "context_budget": 400,
-      "knowledge_context_tokens": 338,
+      "knowledge_context_tokens": 350,
       "query_tokens": 9,
       "instruction_tokens": 78,
       "other_prompt_tokens": 7,
-      "total_input_tokens": 432,
-      "budget_utilization_pct": 84.5,
-      "latency_ms": 9.82
+      "total_input_tokens": 444,
+      "budget_utilization_pct": 87.5,
+      "latency_ms": 84.4
     },
     "baseline_comparison": {
       "status": "PASS",
       "baseline_context_tokens": 2013,
-      "synapse_context_tokens": 338,
-      "token_reduction_pct": 83.21,
-      "baseline_latency_ms": 0.05,
-      "synapse_latency_ms": 9.82,
+      "synapse_context_tokens": 350,
+      "token_reduction_pct": 82.61,
+      "baseline_latency_ms": 0.11,
+      "synapse_latency_ms": 84.4,
       "synapse_timing_breakdown": {}
     },
     "security_boundaries": {
