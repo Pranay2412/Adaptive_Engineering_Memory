@@ -228,13 +228,14 @@ class QueryResultCache:
         self.cache: LRUCache[str, Any] = LRUCache(maxsize=maxsize, ttl_seconds=ttl_seconds)
 
     @staticmethod
-    def _make_key(repository_id: str, query: str, config_hash: str) -> str:
+    def _make_key(repository_id: str, query: str, config_hash: str, tenant_id: str = "default") -> str:
+        norm_tenant = (tenant_id or "default").strip().lower()
         norm_repo = repository_id.strip().lower()
         norm_q = query.strip().lower()
-        return f"{norm_repo}::{config_hash}::{norm_q}"
+        return f"{norm_tenant}::{norm_repo}::{config_hash}::{norm_q}"
 
-    def get(self, repository_id: str, query: str, config_hash: str) -> Any | None:
-        key = self._make_key(repository_id, query, config_hash)
+    def get(self, repository_id: str, query: str, config_hash: str, tenant_id: str = "default") -> Any | None:
+        key = self._make_key(repository_id, query, config_hash, tenant_id)
         return self.cache.get(key)
 
     def put(
@@ -244,20 +245,28 @@ class QueryResultCache:
         config_hash: str,
         result: Any,
         metadata: dict[str, Any] | None = None,
+        tenant_id: str = "default",
     ) -> None:
-        key = self._make_key(repository_id, query, config_hash)
+        key = self._make_key(repository_id, query, config_hash, tenant_id)
         meta = metadata or {}
         meta["repository_id"] = repository_id.strip().lower()
+        meta["tenant_id"] = (tenant_id or "default").strip().lower()
         self.cache.put(key, result, metadata=meta)
 
-    def invalidate_repository(self, repository_id: str) -> int:
-        """Purge all cached query results for a specific repository upon code/doc updates."""
+    def invalidate_repository(self, repository_id: str, tenant_id: str | None = None) -> int:
+        """Purge all cached query results for a specific repository (and optional tenant) upon updates."""
         target_repo = repository_id.strip().lower()
-        prefix = f"{target_repo}::"
-        removed = self.cache.invalidate_matching(
-            lambda k, entry: k.startswith(prefix) or entry.metadata.get("repository_id") == target_repo
-        )
-        logger.info(f"Invalidated {removed} cached query results for repository '{repository_id}'")
+        target_tenant = tenant_id.strip().lower() if tenant_id else None
+
+        def matcher(k: str, entry: CacheEntry[Any]) -> bool:
+            entry_repo = entry.metadata.get("repository_id")
+            entry_tenant = entry.metadata.get("tenant_id")
+            if target_tenant:
+                return (entry_repo == target_repo and entry_tenant == target_tenant) or k.startswith(f"{target_tenant}::{target_repo}::")
+            return entry_repo == target_repo or f"::{target_repo}::" in k or k.startswith(f"{target_repo}::")
+
+        removed = self.cache.invalidate_matching(matcher)
+        logger.info(f"Invalidated {removed} cached query results for repository '{repository_id}' (tenant: {tenant_id})")
         return removed
 
     def stats(self) -> dict[str, Any]:

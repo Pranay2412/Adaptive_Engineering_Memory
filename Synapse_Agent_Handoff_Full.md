@@ -720,8 +720,13 @@ and artifacts.
                                                   tests/test_observability.py (7 passed);
                                                   full test suite verified (417 passed)
 
-  Phase 19 --- Security   Planned                 Threat model and test
-                                                  evidence
+  Phase 19 --- Security   Complete (15-10-2026)   backend/security_hardening.py;
+                                                  backend/cache.py (tenant-scoped cache);
+                                                  backend/api.py (GDPR erasure/export routes);
+                                                  backend/models.py (snippet prompt injection neutralization);
+                                                  docs/security/threat_model_and_mitigations.md;
+                                                  tests/test_security_hardening.py (8 passed);
+                                                  full test suite verified (425 passed)
 
   Phase 20 --- E2E demo   Planned                 Reproducible demo
 

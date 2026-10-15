@@ -346,6 +346,11 @@ class SingleFileExtractor:
         """Parse Python AST to extract classes, functions, methods, and relationships."""
         try:
             content = full_path.read_text(encoding="utf-8", errors="replace")
+            try:
+                from .security_hardening import EnhancedSecretScanner
+                content = EnhancedSecretScanner.redact_for_ingestion(content)
+            except Exception:
+                pass
             tree = ast.parse(content, filename=str(full_path))
         except Exception as e:
             logger.warning("Could not parse Python AST for %s: %s", rel_path, e)
@@ -482,6 +487,11 @@ class SingleFileExtractor:
         """Extract sections, headings, and documented concepts from a Markdown file."""
         try:
             content = full_path.read_text(encoding="utf-8", errors="replace")
+            try:
+                from .security_hardening import EnhancedSecretScanner
+                content = EnhancedSecretScanner.redact_for_ingestion(content)
+            except Exception:
+                pass
         except Exception as e:
             logger.warning("Could not read Markdown for %s: %s", rel_path, e)
             return [], [], []

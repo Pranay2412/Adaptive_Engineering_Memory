@@ -584,7 +584,13 @@ class HybridRetrievalResult:
         if self.provenance.channels:
             lines.append(f"- Matched via: {', '.join(self.provenance.channels)}")
         if self.content_snippet:
-            lines.append(f"- Details: {self.content_snippet}")
+            clean_snippet = self.content_snippet
+            try:
+                from .security_hardening import PromptInjectionDefense
+                clean_snippet = PromptInjectionDefense.neutralize_injection_text(clean_snippet)
+            except Exception:
+                pass
+            lines.append(f"- Details: {clean_snippet}")
         if self.relationship_path:
             path_str = " -> ".join([h.format_hop() for h in self.relationship_path])
             lines.append(f"- Graph Path: {path_str}")

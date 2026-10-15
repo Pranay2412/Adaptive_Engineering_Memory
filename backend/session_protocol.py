@@ -679,6 +679,9 @@ class ContextQueryRequest:
             raise PayloadTooLargeError("query", len(self.query), MAX_QUERY_LENGTH)
         if self.max_tokens <= 0:
             raise MalformedInputError("max_tokens must be positive.", field="max_tokens")
+        if self.active_file:
+            from .security_hardening import SafePathValidator
+            SafePathValidator.validate_safe_relative_path(self.active_file)
 
 
 @dataclass

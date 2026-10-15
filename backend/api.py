@@ -648,6 +648,36 @@ async def distill_session_interaction(
     return res.to_dict()
 
 
+# --- GDPR / Compliance Retention & Erasure (Phase 19) ---
+
+@router.delete("/api/v1/sessions/{session_id}/memories", tags=["Compliance"])
+async def erase_session_memories(
+    session_id: str,
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+    engine: SessionProtocolEngine = Depends(get_protocol_engine),
+):
+    """Permanently delete session memory records for GDPR compliance and right-to-be-forgotten."""
+    if not (principal.has_permission(Permission.MEMORY_WRITE.value) or principal.has_role(Role.ADMIN.value)):
+        raise AccessDeniedError(f"Principal '{principal.principal_id}' lacks permission to erase session memories.")
+    from .security_hardening import MemoryComplianceService
+    compliance_svc = MemoryComplianceService(doc_store=engine.doc_store)
+    return compliance_svc.erase_session_data(session_id=session_id, tenant_id=principal.tenant_id)
+
+
+@router.get("/api/v1/sessions/{session_id}/export", tags=["Compliance"])
+async def export_session_memories(
+    session_id: str,
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+    engine: SessionProtocolEngine = Depends(get_protocol_engine),
+):
+    """Export all stored engineering memories and decisions for a session in standardized JSON format."""
+    if not (principal.has_permission(Permission.MEMORY_READ.value) or principal.has_role(Role.ADMIN.value)):
+        raise AccessDeniedError(f"Principal '{principal.principal_id}' lacks permission to export session memories.")
+    from .security_hardening import MemoryComplianceService
+    compliance_svc = MemoryComplianceService(doc_store=engine.doc_store)
+    return compliance_svc.export_session_memories(session_id=session_id, tenant_id=principal.tenant_id)
+
+
 # --- Scoped Memory Retrieval ---
 
 @router.post("/api/v1/memories/query", tags=["Memory"])
@@ -930,6 +960,8 @@ async def execute_dashboard_query(
             f"Principal '{principal.principal_id}' lacks permission '{Permission.CONTEXT_QUERY.value}'.",
             details={"principal_id": principal.principal_id, "required_permission": Permission.CONTEXT_QUERY.value},
         )
+    from .security_hardening import TenantIsolationEnforcer
+    TenantIsolationEnforcer.enforce_repository_access(principal.allowed_repositories, body.repository_id)
 
     start_time = time.perf_counter()
     mode = OptimizationMode.DETERMINISTIC
