@@ -687,7 +687,10 @@ and artifacts.
                                                   docs/experiments/evaluation_framework.md;
                                                   tests/test_evaluation_framework.py (9 passed)
 
-  Phase 14 --- Ablation   Planned                 Ablation report
+  Phase 14 --- Ablation   Complete (15-10-2026)   benchmarks/ablation_study.py;
+  study                                           benchmarks/results/ablation/;
+                                                  docs/experiments/ablation_study_report.md;
+                                                  tests/test_ablation_study.py (6 passed)
 
   Phase 15 ---            Planned                 Before/after measurements
   Performance/cost                                
