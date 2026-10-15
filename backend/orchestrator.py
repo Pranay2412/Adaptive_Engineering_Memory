@@ -244,6 +244,15 @@ class RuleBasedIntentClassifier(BaseIntentClassifier):
                 retrieval_strategy=dict(strategy),
             )
 
+        if not context:
+            try:
+                from .cache import default_cache_manager
+                cached = default_cache_manager.intent_cache.get(clean_query)
+                if cached is not None:
+                    return cached
+            except Exception:
+                pass
+
         extracted_entities = self.extract_entities(clean_query)
         intent_scores: dict[QueryIntent, float] = {intent: 0.0 for intent in QueryIntent}
 
@@ -308,7 +317,7 @@ class RuleBasedIntentClassifier(BaseIntentClassifier):
         strategy = self.strategies.get(top_intent, self.strategies[QueryIntent.EXPLANATION])
         selected_sources = strategy.get("preferred_sources", [])
 
-        return IntentAnalysisResult(
+        res = IntentAnalysisResult(
             primary_intent=top_intent,
             confidence=round(confidence, 4),
             secondary_intents=secondary_intents,
@@ -317,6 +326,15 @@ class RuleBasedIntentClassifier(BaseIntentClassifier):
             selected_sources=selected_sources,
             retrieval_strategy=dict(strategy),
         )
+
+        if not context:
+            try:
+                from .cache import default_cache_manager
+                default_cache_manager.intent_cache.put(clean_query, res)
+            except Exception:
+                pass
+
+        return res
 
 
 # ---------------------------------------------------------------------------

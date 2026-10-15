@@ -116,6 +116,14 @@ class MemoryRetrievalService:
             return []
 
         cleaned = query.strip()
+        try:
+            from .cache import default_cache_manager
+            cached = default_cache_manager.query_terms_cache.get(cleaned)
+            if cached is not None:
+                return list(cached)
+        except Exception:
+            pass
+
         words = re.findall(r"[A-Za-z0-9_\-\.\:\/]+", cleaned)
 
         terms_set: set[str] = set()
@@ -135,6 +143,11 @@ class MemoryRetrievalService:
 
         # Sort longer, more specific terms first
         terms_list = sorted(terms_set, key=lambda t: (-len(t), t))
+        try:
+            from .cache import default_cache_manager
+            default_cache_manager.query_terms_cache.put(cleaned, list(terms_list))
+        except Exception:
+            pass
         return terms_list
 
     def search_code_symbols(

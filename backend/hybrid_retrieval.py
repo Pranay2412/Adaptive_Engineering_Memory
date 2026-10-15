@@ -12,6 +12,7 @@ context formatting, and token budgeting for the Adaptive Context Orchestrator.
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import logging
 import re
@@ -341,6 +342,7 @@ class HybridRetrievalService:
         symbols: list[CodeSymbol] | None = None,
         entities: list[DocumentEntity] | None = None,
         edges: list[GraphEdge] | None = None,
+        use_cache: bool = True,
     ) -> HybridQueryResponse:
         """Execute hybrid retrieval combining lexical, semantic, and graph channels."""
         if not user_id or not repository_id or not query or not query.strip():
@@ -355,6 +357,30 @@ class HybridRetrievalService:
             )
 
         clean_query = query.strip()
+        config_hash = hashlib.sha256(
+            f"{limit}:{max_hops}:{lexical_weight:.2f}:{semantic_weight:.2f}:{graph_weight:.2f}:{recency_weight:.2f}:{min_score:.2f}:{min_confidence:.2f}:{len(symbols or [])}:{len(entities or [])}:{len(edges or [])}".encode("utf-8")
+        ).hexdigest()[:12]
+
+        if use_cache:
+            try:
+                from .cache import default_cache_manager
+                cached_resp = default_cache_manager.retrieval_cache.get(repository_id, clean_query, config_hash)
+                if cached_resp is not None:
+                    # Return cached response with cache marker
+                    stats_copy = dict(cached_resp.retrieval_stats)
+                    stats_copy["from_cache"] = True
+                    return HybridQueryResponse(
+                        query=cached_resp.query,
+                        user_id=cached_resp.user_id,
+                        repository_id=cached_resp.repository_id,
+                        results=list(cached_resp.results),
+                        total_results=cached_resp.total_results,
+                        query_terms=list(cached_resp.query_terms),
+                        retrieval_stats=stats_copy,
+                    )
+            except Exception:
+                pass
+
         if self.retrieval_service is not None:
             query_terms = self.retrieval_service.extract_query_terms(clean_query)
         else:
@@ -741,9 +767,10 @@ class HybridRetrievalService:
             "graph_traversed_count": len(graph_map),
             "returned_count": len(final_selected),
             "active_channels": ["lexical", "semantic", "graph"],
+            "from_cache": False,
         }
 
-        return HybridQueryResponse(
+        resp = HybridQueryResponse(
             query=clean_query,
             user_id=user_id,
             repository_id=repository_id,
@@ -752,6 +779,17 @@ class HybridRetrievalService:
             query_terms=query_terms,
             retrieval_stats=retrieval_stats,
         )
+
+        if use_cache:
+            try:
+                from .cache import default_cache_manager
+                default_cache_manager.retrieval_cache.put(
+                    repository_id, clean_query, config_hash, resp, metadata={"user_id": user_id}
+                )
+            except Exception:
+                pass
+
+        return resp
 
     def close(self) -> None:
         """Close resources if owned."""

@@ -93,9 +93,24 @@ class TokenEstimator:
 
     @classmethod
     def estimate_item(cls, item: HybridRetrievalResult, tier: ContextTier = ContextTier.FULL) -> int:
-        """Estimate token cost of a candidate item at a given representation tier."""
+        """Estimate token cost of a candidate item at a given representation tier with caching."""
+        cache_key = f"{item.node_id or item.entity}:{tier.value}"
+        try:
+            from .cache import default_cache_manager
+            cached = default_cache_manager.token_estimation_cache.get(cache_key)
+            if cached is not None:
+                return cached
+        except Exception:
+            pass
+
         rendered = render_candidate_item(item, tier)
-        return cls.estimate_text(rendered)
+        est = cls.estimate_text(rendered)
+        try:
+            from .cache import default_cache_manager
+            default_cache_manager.token_estimation_cache.put(cache_key, est)
+        except Exception:
+            pass
+        return est
 
     @classmethod
     def count_item(

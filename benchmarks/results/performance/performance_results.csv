@@ -1,0 +1,6 @@
+query_id,category,cold_median_ms,cold_p95_ms,warm_median_ms,warm_p95_ms,speedup_ratio,latency_reduction_pct,evidence_identical
+SYN-Q01,structural,574.54,599.47,3.47,3.66,165.57,99.4,True
+SYN-Q02,implementation,586.72,645.35,0.79,0.86,742.68,99.87,True
+SYN-Q03,dependency,571.27,642.0,6.07,6.88,94.11,98.94,True
+SYN-Q04,debugging,589.58,646.91,2.81,4.26,209.81,99.52,True
+SYN-Q05,architecture,572.22,643.81,4.52,13.13,126.6,99.21,True

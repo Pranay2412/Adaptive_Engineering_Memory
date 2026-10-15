@@ -103,15 +103,37 @@ def code_symbol_to_text(symbol: CodeSymbol) -> str:
 class BaseEmbeddingProvider(abc.ABC):
     """Abstract interface for dense embedding generation."""
 
+    @property
+    def model_name(self) -> str:
+        return getattr(self, "model", self.__class__.__name__)
+
     @abc.abstractmethod
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Compute embeddings for a batch of input texts."""
         ...
 
-    def embed_query(self, text: str) -> list[float]:
-        """Compute embedding for a single text."""
+    def embed_query(self, text: str, use_cache: bool = True) -> list[float]:
+        """Compute embedding for a single text, utilizing QueryEmbeddingCache when enabled."""
+        if not text:
+            return []
+        if use_cache:
+            try:
+                from .cache import default_cache_manager
+                cached = default_cache_manager.embedding_cache.get(self.model_name, text)
+                if cached is not None:
+                    return cached
+            except Exception:
+                pass
+
         results = self.embed_batch([text])
-        return results[0] if results else []
+        vec = results[0] if results else []
+        if use_cache and vec:
+            try:
+                from .cache import default_cache_manager
+                default_cache_manager.embedding_cache.put(self.model_name, text, vec)
+            except Exception:
+                pass
+        return vec
 
 
 class MockEmbeddingProvider(BaseEmbeddingProvider):

@@ -782,6 +782,13 @@ class IncrementalUpdateService:
         )
         self.save_checkpoint(new_cp)
 
+        # Invalidate cached retrieval results for this repository upon update
+        try:
+            from .cache import default_cache_manager
+            default_cache_manager.invalidate_repository(repository_id)
+        except Exception:
+            pass
+
         elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
         return IncrementalUpdateResult(
