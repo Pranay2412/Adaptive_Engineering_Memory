@@ -1,26 +1,34 @@
-"""Synapse Session & Context REST API (Phase 6.2).
+"""Synapse Session & Context REST API (Phase 6.2 & Phase 10).
 
 Exposes provider-neutral session and context operations over HTTP using
 Phase 6.1 protocol schemas, Adaptive Context Orchestrator (ACO),
 and the SQLite/Neo4j engineering memory stores.
 
-NOTE: This service is currently in DEVELOPMENT-ONLY mode. Secure authentication
-and token verification will be implemented in Phase 9. Body-supplied identity
-attributes are never treated as secure credentials.
+Phase 10 Enhancements:
+- Production-grade FastAPI factory create_app(config)
+- Validated configuration binding (SynapseConfig)
+- Modern lifespan context manager for startup/shutdown
+- Production error sanitization (traceback masking)
+- Liveness (/health) and readiness (/ready) probes
+- Request timeout and payload size limit enforcement
+- Safe configuration diagnostics endpoint (/api/v1/config)
 """
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
 import logging
 import os
 import time
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from .config import EnvironmentMode, SynapseConfig, load_config_from_env
 from .orchestrator import AdaptiveContextOrchestrator
 from .security import ApiKeyService, Permission, TokenService, principal_from_api_key
 from .session_memory import AISessionMemoryService
@@ -73,25 +81,8 @@ from .team_memory_store import TeamMemoryDocumentStore
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Global Application & Service Factory
+# Global Engine Factory & Dependency Injection
 # ---------------------------------------------------------------------------
-
-app = FastAPI(
-    title="Synapse Adaptive Engineering Memory API",
-    version=CURRENT_PROTOCOL_VERSION,
-    description="Provider-neutral REST API for cross-IDE session and context management.",
-    docs_url="/docs",
-    openapi_url="/openapi.json",
-)
-
-# Enable CORS for local cross-IDE extensions (VS Code, JetBrains, Browser clients)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 _ENGINE: SessionProtocolEngine | None = None
 
@@ -118,83 +109,11 @@ def reset_protocol_engine(engine: SessionProtocolEngine | None = None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Middleware: Request ID, Timing & Security Disclaimers
-# ---------------------------------------------------------------------------
-
-@app.middleware("http")
-async def protocol_envelope_middleware(request: Request, call_next):
-    start_time = time.perf_counter()
-
-    # Extract or generate Request ID
-    req_id = request.headers.get("X-Request-ID") or f"req_{utc_now_iso()[:10]}_{int(start_time * 1000) % 1000000}"
-    request.state.request_id = req_id
-
-    response: Response = await call_next(request)
-
-    duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-    response.headers["X-Request-ID"] = req_id
-    response.headers["X-Response-Time-Ms"] = str(duration_ms)
-    response.headers["X-Synapse-Mode"] = "development-only"
-    response.headers["X-Synapse-Protocol-Version"] = CURRENT_PROTOCOL_VERSION
-    response.headers["X-Synapse-Security-Warning"] = (
-        "Development mode: principal identity is simulated or header-derived; production auth is enforced in Phase 9."
-    )
-    return response
-
-
-# ---------------------------------------------------------------------------
-# Exception Handlers
-# ---------------------------------------------------------------------------
-
-@app.exception_handler(ProtocolException)
-async def protocol_exception_handler(request: Request, exc: ProtocolException):
-    status_map = {
-        ErrorCode.MALFORMED_INPUT.value: status.HTTP_400_BAD_REQUEST,
-        ErrorCode.PAYLOAD_TOO_LARGE.value: status.HTTP_400_BAD_REQUEST,
-        ErrorCode.UNSUPPORTED_PROTOCOL_VERSION.value: status.HTTP_422_UNPROCESSABLE_ENTITY,
-        ErrorCode.AUTHENTICATION_REQUIRED.value: status.HTTP_401_UNAUTHORIZED,
-        ErrorCode.ACCESS_DENIED.value: status.HTTP_403_FORBIDDEN,
-        ErrorCode.INVALID_SCOPE.value: status.HTTP_403_FORBIDDEN,
-        ErrorCode.SESSION_NOT_FOUND.value: status.HTTP_404_NOT_FOUND,
-        ErrorCode.SESSION_CLOSED.value: status.HTTP_409_CONFLICT,
-        ErrorCode.SESSION_EXPIRED.value: status.HTTP_409_CONFLICT,
-        ErrorCode.REPOSITORY_MISMATCH.value: status.HTTP_409_CONFLICT,
-        ErrorCode.IDEMPOTENCY_CONFLICT.value: status.HTTP_409_CONFLICT,
-        ErrorCode.RATE_LIMITED.value: status.HTTP_429_TOO_MANY_REQUESTS,
-    }
-    http_code = status_map.get(exc.code, status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    envelope = ProtocolEnvelope(
-        protocol_version=CURRENT_PROTOCOL_VERSION,
-        request_id=getattr(request.state, "request_id", "req_unknown"),
-        timestamp=utc_now_iso(),
-    )
-    error_resp = ProtocolErrorResponse(envelope=envelope, error=exc.to_error_detail())
-    return JSONResponse(status_code=http_code, content=error_resp.to_dict())
-
-
-@app.exception_handler(Exception)
-async def generic_exception_handler(request: Request, exc: Exception):
-    logger.exception("Unhandled server exception during request %s: %s", getattr(request.state, "request_id", "req_unknown"), exc)
-    envelope = ProtocolEnvelope(
-        protocol_version=CURRENT_PROTOCOL_VERSION,
-        request_id=getattr(request.state, "request_id", "req_unknown"),
-        timestamp=utc_now_iso(),
-    )
-    detail = ProtocolErrorDetail(
-        code=ErrorCode.INTERNAL_ERROR.value,
-        message=f"An unexpected internal error occurred: {str(exc)}",
-        retryable=True,
-    )
-    error_resp = ProtocolErrorResponse(envelope=envelope, error=detail)
-    return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=error_resp.to_dict())
-
-
-# ---------------------------------------------------------------------------
-# Principal Resolution Dependency (Development Authentication Boundary)
+# Principal Resolution Dependency (Authentication & RBAC Boundary)
 # ---------------------------------------------------------------------------
 
 def get_current_principal(
+    request: Request,
     authorization: str | None = Header(None, alias="Authorization"),
     x_api_key: str | None = Header(None, alias="X-API-Key"),
     x_principal_id: str | None = Header(None, alias="X-Principal-ID"),
@@ -209,7 +128,7 @@ def get_current_principal(
     1. Cryptographic Bearer Token: Authorization: Bearer <token> -> validated cryptographically.
     2. API Key: Authorization: ApiKey <key> OR X-API-Key: <key> -> validated via SHA-256 hash lookup.
     3. Development Fallback: In local dev, derives principal from simulation headers.
-       If environment variable SYNAPSE_REQUIRE_AUTH is set to "1"/"true", fallback is disabled.
+       If require_auth is enabled in config or SYNAPSE_REQUIRE_AUTH is set to "1"/"true", fallback is disabled.
     """
     # 1. Bearer Token Authentication
     if authorization and authorization.lower().startswith("bearer "):
@@ -236,7 +155,12 @@ def get_current_principal(
         return principal_from_api_key(record)
 
     # 3. Development Fallback
-    require_auth = os.environ.get("SYNAPSE_REQUIRE_AUTH", "").lower() in ("1", "true", "yes")
+    require_auth = False
+    if request and hasattr(request, "app") and hasattr(request.app.state, "config"):
+        require_auth = request.app.state.config.require_auth
+    if not require_auth:
+        require_auth = os.environ.get("SYNAPSE_REQUIRE_AUTH", "").lower() in ("1", "true", "yes")
+
     if require_auth:
         raise AuthenticationRequiredError("Authentication required: missing Bearer token or API key.")
 
@@ -363,24 +287,76 @@ class ScopedRetrievalBody(BaseModel):
     envelope: EnvelopeSchema = Field(default_factory=EnvelopeSchema)
 
 
+class CreateApiKeyBody(BaseModel):
+    name: str = Field(..., max_length=128)
+    roles: list[str] = Field(default_factory=lambda: ["developer"])
+    allowed_repositories: list[str] = Field(default_factory=lambda: ["*"])
+    allowed_teams: list[str] = Field(default_factory=list)
+    expires_at: str | None = None
+
+
 # ---------------------------------------------------------------------------
-# API Endpoints
+# API Routes (Registered via APIRouter)
 # ---------------------------------------------------------------------------
 
-@app.get("/health", tags=["System"])
-@app.get("/api/v1/health", tags=["System"])
-async def health_check():
-    """Service health and capability status."""
+router = APIRouter()
+
+
+@router.get("/health", tags=["System"])
+@router.get("/api/v1/health", tags=["System"])
+async def health_check(request: Request):
+    """Service liveness probe and capability status."""
+    config: SynapseConfig = getattr(request.app.state, "config", None) or SynapseConfig()
+    mode_str = "development-only" if config.environment == EnvironmentMode.DEVELOPMENT.value else config.environment
     return {
         "status": "ok",
         "service": "synapse-session-context-api",
         "version": CURRENT_PROTOCOL_VERSION,
-        "mode": "development-only",
+        "mode": mode_str,
         "timestamp": utc_now_iso(),
     }
 
 
-@app.get("/api/v1/status", tags=["System"])
+@router.get("/ready", tags=["System"])
+@router.get("/api/v1/ready", tags=["System"])
+async def readiness_check(
+    request: Request,
+    engine: SessionProtocolEngine = Depends(get_protocol_engine),
+):
+    """Readiness probe checking database connectivity and system operational state."""
+    checks: dict[str, str] = {}
+    is_ready = getattr(request.app.state, "ready", True)
+
+    if engine.doc_store is not None:
+        try:
+            if hasattr(engine.doc_store, "count_memories"):
+                count = engine.doc_store.count_memories()
+                checks["database"] = f"ok ({count} memories)"
+            else:
+                checks["database"] = "ok"
+        except Exception as exc:
+            checks["database"] = f"error: {str(exc)}"
+            is_ready = False
+    else:
+        checks["database"] = "not_configured"
+        is_ready = False
+
+    if engine.orchestrator is not None:
+        checks["orchestrator"] = "ok"
+    else:
+        checks["orchestrator"] = "not_configured"
+
+    resp_content = {
+        "status": "ready" if is_ready else "not_ready",
+        "service": "synapse-session-context-api",
+        "timestamp": utc_now_iso(),
+        "checks": checks,
+    }
+    http_status = status.HTTP_200_OK if is_ready else status.HTTP_503_SERVICE_UNAVAILABLE
+    return JSONResponse(status_code=http_status, content=resp_content)
+
+
+@router.get("/api/v1/status", tags=["System"])
 async def service_status(
     engine: SessionProtocolEngine = Depends(get_protocol_engine),
 ):
@@ -396,9 +372,23 @@ async def service_status(
     }
 
 
+@router.get("/api/v1/config", tags=["System"])
+async def service_config(
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+):
+    """Retrieve runtime service configuration with sensitive credentials redacted."""
+    config: SynapseConfig = getattr(request.app.state, "config", None) or load_config_from_env()
+    return {
+        "status": "ok",
+        "config": config.to_safe_dict(),
+        "timestamp": utc_now_iso(),
+    }
+
+
 # --- Session Lifecycle ---
 
-@app.post("/api/v1/sessions", tags=["Sessions"], status_code=status.HTTP_201_CREATED)
+@router.post("/api/v1/sessions", tags=["Sessions"], status_code=status.HTTP_201_CREATED)
 async def create_session(
     body: CreateSessionBody,
     request: Request,
@@ -439,8 +429,8 @@ async def create_session(
     return res.to_dict()
 
 
-@app.get("/api/v1/sessions/{session_id}", tags=["Sessions"])
-@app.post("/api/v1/sessions/{session_id}/resume", tags=["Sessions"])
+@router.get("/api/v1/sessions/{session_id}", tags=["Sessions"])
+@router.post("/api/v1/sessions/{session_id}/resume", tags=["Sessions"])
 async def resume_session(
     session_id: str,
     request: Request,
@@ -471,7 +461,7 @@ async def resume_session(
     return res.to_dict()
 
 
-@app.post("/api/v1/sessions/{session_id}/close", tags=["Sessions"])
+@router.post("/api/v1/sessions/{session_id}/close", tags=["Sessions"])
 async def close_session(
     session_id: str,
     body: CloseSessionBody,
@@ -497,7 +487,7 @@ async def close_session(
 
 # --- Context Query ---
 
-@app.post("/api/v1/sessions/{session_id}/context", tags=["Context"])
+@router.post("/api/v1/sessions/{session_id}/context", tags=["Context"])
 async def query_context(
     session_id: str,
     body: ContextQueryBody,
@@ -528,7 +518,7 @@ async def query_context(
 
 # --- Memory & Decision Writes ---
 
-@app.post("/api/v1/sessions/{session_id}/decisions", tags=["Memory"], status_code=status.HTTP_201_CREATED)
+@router.post("/api/v1/sessions/{session_id}/decisions", tags=["Memory"], status_code=status.HTTP_201_CREATED)
 async def store_decision(
     session_id: str,
     body: StoreDecisionBody,
@@ -560,7 +550,7 @@ async def store_decision(
     return res.to_dict()
 
 
-@app.post("/api/v1/sessions/{session_id}/facts", tags=["Memory"], status_code=status.HTTP_201_CREATED)
+@router.post("/api/v1/sessions/{session_id}/facts", tags=["Memory"], status_code=status.HTTP_201_CREATED)
 async def store_fact(
     session_id: str,
     body: StoreFactBody,
@@ -591,7 +581,7 @@ async def store_fact(
     return res.to_dict()
 
 
-@app.post("/api/v1/sessions/{session_id}/distill", tags=["Memory"])
+@router.post("/api/v1/sessions/{session_id}/distill", tags=["Memory"])
 async def distill_session_interaction(
     session_id: str,
     body: StoreSessionSummaryBody,
@@ -625,7 +615,7 @@ async def distill_session_interaction(
 
 # --- Scoped Memory Retrieval ---
 
-@app.post("/api/v1/memories/query", tags=["Memory"])
+@router.post("/api/v1/memories/query", tags=["Memory"])
 async def query_scoped_memories(
     body: ScopedRetrievalBody,
     request: Request,
@@ -654,15 +644,7 @@ async def query_scoped_memories(
 # Auth & Security Management Endpoints (Phase 9)
 # ---------------------------------------------------------------------------
 
-class CreateApiKeyBody(BaseModel):
-    name: str = Field(..., max_length=128)
-    roles: list[str] = Field(default_factory=lambda: ["developer"])
-    allowed_repositories: list[str] = Field(default_factory=lambda: ["*"])
-    allowed_teams: list[str] = Field(default_factory=list)
-    expires_at: str | None = None
-
-
-@app.get("/api/v1/auth/me", tags=["Authentication"])
+@router.get("/api/v1/auth/me", tags=["Authentication"])
 async def get_my_principal(
     principal: AuthenticatedPrincipal = Depends(get_current_principal),
 ):
@@ -670,7 +652,7 @@ async def get_my_principal(
     return principal.to_dict()
 
 
-@app.get("/api/v1/security/audit", tags=["Security"])
+@router.get("/api/v1/security/audit", tags=["Security"])
 async def list_security_audit_events(
     tenant_id: str | None = None,
     principal_id: str | None = None,
@@ -694,7 +676,7 @@ async def list_security_audit_events(
     return [e.to_dict() if hasattr(e, "to_dict") else e for e in events]
 
 
-@app.post("/api/v1/auth/api-keys", tags=["Authentication"], status_code=status.HTTP_201_CREATED)
+@router.post("/api/v1/auth/api-keys", tags=["Authentication"], status_code=status.HTTP_201_CREATED)
 async def create_api_key(
     body: CreateApiKeyBody,
     principal: AuthenticatedPrincipal = Depends(get_current_principal),
@@ -723,7 +705,7 @@ async def create_api_key(
     }
 
 
-@app.delete("/api/v1/auth/api-keys/{key_id}", tags=["Authentication"])
+@router.delete("/api/v1/auth/api-keys/{key_id}", tags=["Authentication"])
 async def revoke_api_key(
     key_id: str,
     principal: AuthenticatedPrincipal = Depends(get_current_principal),
@@ -744,3 +726,199 @@ async def revoke_api_key(
         )
     return {"key_id": key_id, "revoked": True}
 
+
+# ---------------------------------------------------------------------------
+# Application Factory & Lifespan Management (Phase 10)
+# ---------------------------------------------------------------------------
+
+def create_app(config: SynapseConfig | None = None) -> FastAPI:
+    """Create and configure a production-ready Synapse FastAPI application."""
+    if config is None:
+        config = load_config_from_env()
+    else:
+        config.validate()
+
+    @asynccontextmanager
+    async def lifespan(app_instance: FastAPI):
+        logger.info(
+            "Initializing Synapse API service (environment: %s, host: %s, port: %d)...",
+            config.environment,
+            config.host,
+            config.port,
+        )
+        engine = get_protocol_engine()
+        app_instance.state.engine = engine
+        app_instance.state.ready = True
+        yield
+        logger.info("Shutting down Synapse API service...")
+        app_instance.state.ready = False
+
+    app_instance = FastAPI(
+        title="Synapse Adaptive Engineering Memory API",
+        version=CURRENT_PROTOCOL_VERSION,
+        description="Provider-neutral REST API for cross-IDE session and context management.",
+        docs_url="/docs" if config.environment != EnvironmentMode.PRODUCTION.value else None,
+        openapi_url="/openapi.json" if config.environment != EnvironmentMode.PRODUCTION.value else None,
+        lifespan=lifespan,
+    )
+
+    app_instance.state.config = config
+    app_instance.state.ready = True
+
+    # 1. CORS Middleware
+    app_instance.add_middleware(
+        CORSMiddleware,
+        allow_origins=config.cors_allowed_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # 2. HTTP Request Processing Middleware (Envelope, Timing, Size Limits, Timeouts)
+    @app_instance.middleware("http")
+    async def protocol_envelope_middleware(request: Request, call_next):
+        start_time = time.perf_counter()
+
+        req_id = request.headers.get("X-Request-ID") or f"req_{utc_now_iso()[:10]}_{int(start_time * 1000) % 1000000}"
+        request.state.request_id = req_id
+
+        http_413 = getattr(status, "HTTP_413_CONTENT_TOO_LARGE", 413)
+
+        # Payload Size Check via Content-Length header
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                cl_val = int(content_length)
+                if cl_val > config.max_request_payload_bytes:
+                    envelope = ProtocolEnvelope(
+                        protocol_version=CURRENT_PROTOCOL_VERSION,
+                        request_id=req_id,
+                        timestamp=utc_now_iso(),
+                    )
+                    error_detail = ProtocolErrorDetail(
+                        code=ErrorCode.PAYLOAD_TOO_LARGE.value,
+                        message=f"Request payload size ({cl_val} bytes) exceeds limit of {config.max_request_payload_bytes} bytes.",
+                        retryable=False,
+                    )
+                    error_resp = ProtocolErrorResponse(envelope=envelope, error=error_detail)
+                    return JSONResponse(status_code=http_413, content=error_resp.to_dict())
+            except ValueError:
+                pass
+
+        # Payload Size Check for body on mutating requests without Content-Length
+        if request.method in ("POST", "PUT", "PATCH") and not content_length:
+            body = await request.body()
+            if len(body) > config.max_request_payload_bytes:
+                envelope = ProtocolEnvelope(
+                    protocol_version=CURRENT_PROTOCOL_VERSION,
+                    request_id=req_id,
+                    timestamp=utc_now_iso(),
+                )
+                error_detail = ProtocolErrorDetail(
+                    code=ErrorCode.PAYLOAD_TOO_LARGE.value,
+                    message=f"Request payload size ({len(body)} bytes) exceeds limit of {config.max_request_payload_bytes} bytes.",
+                    retryable=False,
+                )
+                error_resp = ProtocolErrorResponse(envelope=envelope, error=error_detail)
+                return JSONResponse(status_code=http_413, content=error_resp.to_dict())
+
+        # Request Timeout Execution
+        try:
+            response: Response = await asyncio.wait_for(
+                call_next(request),
+                timeout=config.request_timeout_seconds,
+            )
+        except (asyncio.TimeoutError, TimeoutError):
+            duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            envelope = ProtocolEnvelope(
+                protocol_version=CURRENT_PROTOCOL_VERSION,
+                request_id=req_id,
+                timestamp=utc_now_iso(),
+            )
+            error_detail = ProtocolErrorDetail(
+                code=ErrorCode.INTERNAL_ERROR.value,
+                message=f"Request processing timed out after {config.request_timeout_seconds}s.",
+                retryable=True,
+            )
+            error_resp = ProtocolErrorResponse(envelope=envelope, error=error_detail)
+            timeout_resp = JSONResponse(status_code=status.HTTP_504_GATEWAY_TIMEOUT, content=error_resp.to_dict())
+            timeout_resp.headers["X-Request-ID"] = req_id
+            timeout_resp.headers["X-Response-Time-Ms"] = str(duration_ms)
+            return timeout_resp
+
+        duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        response.headers["X-Request-ID"] = req_id
+        response.headers["X-Response-Time-Ms"] = str(duration_ms)
+        mode_str = "development-only" if config.environment == EnvironmentMode.DEVELOPMENT.value else config.environment
+        response.headers["X-Synapse-Mode"] = mode_str
+        response.headers["X-Synapse-Protocol-Version"] = CURRENT_PROTOCOL_VERSION
+        if config.environment == EnvironmentMode.DEVELOPMENT.value:
+            response.headers["X-Synapse-Security-Warning"] = (
+                "Development mode: principal identity is simulated or header-derived; production auth is enforced in Phase 9."
+            )
+        return response
+
+    # 3. Exception Handlers
+    @app_instance.exception_handler(ProtocolException)
+    async def protocol_exception_handler(request: Request, exc: ProtocolException):
+        http_413 = getattr(status, "HTTP_413_CONTENT_TOO_LARGE", 413)
+        http_422 = getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422)
+        status_map = {
+            ErrorCode.MALFORMED_INPUT.value: status.HTTP_400_BAD_REQUEST,
+            ErrorCode.PAYLOAD_TOO_LARGE.value: http_413,
+            ErrorCode.UNSUPPORTED_PROTOCOL_VERSION.value: http_422,
+            ErrorCode.AUTHENTICATION_REQUIRED.value: status.HTTP_401_UNAUTHORIZED,
+            ErrorCode.ACCESS_DENIED.value: status.HTTP_403_FORBIDDEN,
+            ErrorCode.INVALID_SCOPE.value: status.HTTP_403_FORBIDDEN,
+            ErrorCode.SESSION_NOT_FOUND.value: status.HTTP_404_NOT_FOUND,
+            ErrorCode.SESSION_CLOSED.value: status.HTTP_409_CONFLICT,
+            ErrorCode.SESSION_EXPIRED.value: status.HTTP_409_CONFLICT,
+            ErrorCode.REPOSITORY_MISMATCH.value: status.HTTP_409_CONFLICT,
+            ErrorCode.IDEMPOTENCY_CONFLICT.value: status.HTTP_409_CONFLICT,
+            ErrorCode.RATE_LIMITED.value: status.HTTP_429_TOO_MANY_REQUESTS,
+        }
+        http_code = status_map.get(exc.code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        envelope = ProtocolEnvelope(
+            protocol_version=CURRENT_PROTOCOL_VERSION,
+            request_id=getattr(request.state, "request_id", "req_unknown"),
+            timestamp=utc_now_iso(),
+        )
+        error_resp = ProtocolErrorResponse(envelope=envelope, error=exc.to_error_detail())
+        return JSONResponse(status_code=http_code, content=error_resp.to_dict())
+
+    @app_instance.exception_handler(Exception)
+    async def generic_exception_handler(request: Request, exc: Exception):
+        req_id = getattr(request.state, "request_id", "req_unknown")
+        logger.exception("Unhandled server exception during request %s: %s", req_id, exc)
+
+        envelope = ProtocolEnvelope(
+            protocol_version=CURRENT_PROTOCOL_VERSION,
+            request_id=req_id,
+            timestamp=utc_now_iso(),
+        )
+        is_prod = config.environment == EnvironmentMode.PRODUCTION.value
+        msg = (
+            "An unexpected internal error occurred. Please contact system administrator with your request ID."
+            if is_prod
+            else f"An unexpected internal error occurred: {str(exc)}"
+        )
+        detail = ProtocolErrorDetail(
+            code=ErrorCode.INTERNAL_ERROR.value,
+            message=msg,
+            retryable=True,
+        )
+        error_resp = ProtocolErrorResponse(envelope=envelope, error=detail)
+        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=error_resp.to_dict())
+
+    # 4. Attach API Routes
+    app_instance.include_router(router)
+
+    return app_instance
+
+
+# ---------------------------------------------------------------------------
+# Default Application Singleton (Backward Compatibility)
+# ---------------------------------------------------------------------------
+
+app = create_app()
