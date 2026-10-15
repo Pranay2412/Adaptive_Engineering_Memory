@@ -101,6 +101,12 @@ services:
         reservations:
           cpus: "0.2"
           memory: 256M
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-I", "http://127.0.0.1:8001/sse"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   # ----------------------------------------------------------------------------
   # 3. Synapse Background Worker Daemon (Incremental Sync & Scheduled Tasks)
@@ -125,6 +131,8 @@ services:
     depends_on:
       synapse-api:
         condition: service_healthy
+    healthcheck:
+      disable: true
 
   # ----------------------------------------------------------------------------
   # 4. PostgreSQL Relational Database Service (Enterprise Team Memory)
