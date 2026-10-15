@@ -667,7 +667,14 @@ and artifacts.
                                                   docs/api/fastapi_service.md;
                                                   tests/test_fastapi_service.py (22 passed)
 
-  Phase 11 --- Python SDK Planned                 SDK tests and example
+  Phase 11 --- Python SDK Complete (15-10-2026)   synapse_sdk/__init__.py;
+                                                  synapse_sdk/client.py;
+                                                  synapse_sdk/config.py;
+                                                  synapse_sdk/models.py;
+                                                  synapse_sdk/exceptions.py;
+                                                  examples/sdk_usage_example.py;
+                                                  docs/api/python_sdk.md;
+                                                  tests/test_sdk.py (28 passed)
 
   Phase 12 --- Production Planned                 Reliability/compatibility
   MCP                                             tests
