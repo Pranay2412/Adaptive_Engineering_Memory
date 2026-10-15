@@ -706,6 +706,8 @@ def main() -> None:
 
     if args.transport == "sse":
         print(f"Starting Synapse MCP Server on SSE transport {args.host}:{args.port}...")
+        mcp_server.settings.host = args.host
+        mcp_server.settings.port = args.port
         mcp_server.run(transport="sse")
     else:
         mcp_server.run(transport="stdio")

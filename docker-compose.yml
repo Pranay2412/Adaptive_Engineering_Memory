@@ -1,32 +1,49 @@
-version: "3.8"
+# ==============================================================================
+# Synapse: Adaptive Engineering Memory Platform - Full Multi-Service Docker Compose
+# Orchestrates:
+#   1. synapse-api:     FastAPI Context Engine & Interactive Dashboard (Port 8088 -> 8000)
+#   2. synapse-mcp:     Model Context Protocol SSE Server for IDEs (Port 8081 -> 8001)
+#   3. synapse-worker:  Background Indexing and Memory Maintenance Daemon
+#   4. postgres:        Persistent Relational Store for Team Memories & Decisions (Port 5435 -> 5432)
+#   5. neo4j:           Graph Database for Deep Entity & AST Relationships (Port 7474, 7687)
+#   6. prometheus:      Time-Series Metrics Scraper for Telemetry & Latencies (Port 9091 -> 9090)
+#   7. grafana:         Observability Dashboards with Pre-Provisioned Panels (Port 3001 -> 3000)
+# ==============================================================================
 
-# ==============================================================================
-# Synapse: Adaptive Engineering Memory Platform - Docker Compose
-# Orchestrates FastAPI Context Engine and Optional Neo4j Graph Database (Phase 17)
-# ==============================================================================
+networks:
+  synapse_net:
+    name: synapse_network
+    driver: bridge
 
 services:
+  # ----------------------------------------------------------------------------
+  # 1. Synapse REST API & Engineering Memory Dashboard
+  # ----------------------------------------------------------------------------
   synapse-api:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: synapse-api
     restart: unless-stopped
+    command: ["api"]
+    networks:
+      - synapse_net
     ports:
-      - "${SYNAPSE_PORT:-8000}:8000"
+      - "${SYNAPSE_PORT:-8088}:8000"
     environment:
       - SYNAPSE_ENV=${SYNAPSE_ENV:-production}
       - SYNAPSE_HOST=0.0.0.0
       - SYNAPSE_PORT=8000
       - SYNAPSE_REQUIRE_AUTH=${SYNAPSE_REQUIRE_AUTH:-false}
-      - SYNAPSE_SECRET_KEY=${SYNAPSE_SECRET_KEY:-synapse-insecure-dev-secret-key-32chars-min-length-12345}
+      - SYNAPSE_SECRET_KEY=${SYNAPSE_SECRET_KEY:-synapse-prod-secret-key-9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c}
       - SYNAPSE_DB_PATH=/app/data/synapse_team_memory.db
+      - DATABASE_URL=postgresql://synapse:${POSTGRES_PASSWORD:-synapse_secure_db_pass_123}@postgres:5432/synapse
       - SYNAPSE_CORS_ORIGINS=${SYNAPSE_CORS_ORIGINS:-*}
       - SYNAPSE_REQUEST_TIMEOUT=${SYNAPSE_REQUEST_TIMEOUT:-30.0}
       - SYNAPSE_MAX_PAYLOAD_BYTES=${SYNAPSE_MAX_PAYLOAD_BYTES:-10485760}
       - SYNAPSE_LOG_LEVEL=${SYNAPSE_LOG_LEVEL:-INFO}
-      - NEO4J_URI=${NEO4J_URI:-bolt://neo4j:7687}
-      - NEO4J_USERNAME=${NEO4J_USERNAME:-neo4j}
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USERNAME=neo4j
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:-synapse-graph-secret-password-123}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
@@ -44,22 +61,115 @@ services:
           memory: 512M
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
-      interval: 30s
+      interval: 15s
       timeout: 5s
       retries: 3
       start_period: 15s
 
-  # Optional dedicated graph database service for heavy enterprise deployments
+  # ----------------------------------------------------------------------------
+  # 2. Synapse Model Context Protocol (MCP) Server (SSE Transport for IDEs)
+  # ----------------------------------------------------------------------------
+  synapse-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: synapse-mcp
+    restart: unless-stopped
+    command: ["mcp"]
+    networks:
+      - synapse_net
+    ports:
+      - "${SYNAPSE_MCP_PORT:-8081}:8001"
+    environment:
+      - SYNAPSE_ENV=${SYNAPSE_ENV:-production}
+      - SYNAPSE_HOST=0.0.0.0
+      - SYNAPSE_MCP_PORT=8001
+      - SYNAPSE_DB_PATH=/app/data/synapse_team_memory.db
+      - SYNAPSE_LOG_LEVEL=${SYNAPSE_LOG_LEVEL:-INFO}
+      - SYNAPSE_REQUIRE_AUTH=${SYNAPSE_REQUIRE_AUTH:-false}
+    volumes:
+      - synapse_data:/app/data
+      - synapse_graph:/app/graphify-out
+    depends_on:
+      synapse-api:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2048M
+        reservations:
+          cpus: "0.2"
+          memory: 256M
+
+  # ----------------------------------------------------------------------------
+  # 3. Synapse Background Worker Daemon (Incremental Sync & Scheduled Tasks)
+  # ----------------------------------------------------------------------------
+  synapse-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: synapse-worker
+    restart: unless-stopped
+    command: ["worker"]
+    networks:
+      - synapse_net
+    environment:
+      - SYNAPSE_ENV=${SYNAPSE_ENV:-production}
+      - SYNAPSE_DB_PATH=/app/data/synapse_team_memory.db
+      - SYNAPSE_LOG_LEVEL=${SYNAPSE_LOG_LEVEL:-INFO}
+    volumes:
+      - synapse_data:/app/data
+      - synapse_graph:/app/graphify-out
+      - synapse_backups:/app/backups
+    depends_on:
+      synapse-api:
+        condition: service_healthy
+
+  # ----------------------------------------------------------------------------
+  # 4. PostgreSQL Relational Database Service (Enterprise Team Memory)
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: synapse-postgres
+    restart: unless-stopped
+    networks:
+      - synapse_net
+    ports:
+      - "${POSTGRES_PORT:-5435}:5432"
+    environment:
+      - POSTGRES_DB=synapse
+      - POSTGRES_USER=synapse
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-synapse_secure_db_pass_123}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2048M
+        reservations:
+          cpus: "0.2"
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synapse -d synapse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ----------------------------------------------------------------------------
+  # 5. Neo4j Graph Database Service (Deep Entity & AST Relationship Index)
+  # ----------------------------------------------------------------------------
   neo4j:
     image: neo4j:5.26-community
     container_name: synapse-neo4j
     restart: unless-stopped
-    profiles:
-      - full
-      - graph
+    networks:
+      - synapse_net
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "${NEO4J_HTTP_PORT:-7474}:7474"
+      - "${NEO4J_BOLT_PORT:-7687}:7687"
     environment:
       - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-synapse-graph-secret-password-123}
       - NEO4J_PLUGINS=["apoc"]
@@ -80,6 +190,59 @@ services:
       retries: 3
       start_period: 20s
 
+  # ----------------------------------------------------------------------------
+  # 6. Prometheus Metrics Collector (Telemetry, ACO Token & Latency Scraper)
+  # ----------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: synapse-prometheus
+    restart: unless-stopped
+    networks:
+      - synapse_net
+    ports:
+      - "${PROMETHEUS_PORT:-9091}:9090"
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      synapse-api:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
+
+  # ----------------------------------------------------------------------------
+  # 7. Grafana Visualization Dashboard (Pre-Provisioned Observability)
+  # ----------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: synapse-grafana
+    restart: unless-stopped
+    networks:
+      - synapse_net
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-synapse_grafana_pass}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
+
+# ------------------------------------------------------------------------------
+# Persistent Volume Declarations
+# ------------------------------------------------------------------------------
 volumes:
   synapse_data:
     name: synapse_data
@@ -87,5 +250,11 @@ volumes:
     name: synapse_graph
   synapse_backups:
     name: synapse_backups
+  postgres_data:
+    name: synapse_postgres_data
   neo4j_data:
-    name: neo4j_data
+    name: synapse_neo4j_data
+  prometheus_data:
+    name: synapse_prometheus_data
+  grafana_data:
+    name: synapse_grafana_data

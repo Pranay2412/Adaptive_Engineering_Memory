@@ -56,7 +56,43 @@ Adaptive Engineering Memory constructs a unified cognitive repository knowledge 
 
 ---
 
-## Setup & Installation
+## Quickstart with Docker (Recommended)
+
+Run all Synapse platform services, including the **FastAPI REST API**, **Web Dashboard**, **Model Context Protocol (MCP) SSE Server**, **PostgreSQL**, **Neo4j**, **Prometheus**, and **Grafana** using Docker Compose:
+
+```bash
+# 1. Copy environment template
+cp .env.example .env
+
+# 2. Build and launch all 7 services
+docker compose up -d
+
+# 3. Verify container health
+docker compose ps
+```
+
+### Container Endpoints & Services:
+- **Engineering Memory Dashboard:** [http://localhost:8088/dashboard](http://localhost:8088/dashboard)
+- **FastAPI REST API (Swagger):** [http://localhost:8088/docs](http://localhost:8088/docs)
+- **Model Context Protocol (MCP) SSE Server:** `http://localhost:8081/sse`
+- **Grafana Observability Dashboard:** [http://localhost:3001](http://localhost:3001) (`admin` / `synapse_grafana_pass`)
+- **Prometheus Telemetry Scraper:** [http://localhost:9091](http://localhost:9091)
+- **Neo4j Graph Database Browser:** [http://localhost:7474](http://localhost:7474)
+
+### Containerized CLI Utilities:
+```bash
+# Run deployment smoke test in container
+docker compose run --rm synapse-api smoke-test
+
+# Run reproducible end-to-end demo in container
+docker compose run --rm synapse-api demo
+```
+
+*(For complete container documentation, see [`docs/deployment/docker_deployment_guide.md`](docs/deployment/docker_deployment_guide.md)).*
+
+---
+
+## Local Setup & Installation (Without Docker)
 
 ### 1. Create Virtual Environment & Install Dependencies
 
