@@ -676,8 +676,10 @@ and artifacts.
                                                   docs/api/python_sdk.md;
                                                   tests/test_sdk.py (28 passed)
 
-  Phase 12 --- Production Planned                 Reliability/compatibility
-  MCP                                             tests
+  Phase 12 --- Production Complete (15-10-2026)   backend/mcp_server.py;
+  MCP                                             docs/mcp/production_mcp.md;
+                                                  tests/test_mcp_production.py (11 passed);
+                                                  tests/test_mcp_adapter.py (9 passed)
 
   Phase 13 --- Evaluation Planned / audit         Reproducible runner
   framework               existing scripts        
