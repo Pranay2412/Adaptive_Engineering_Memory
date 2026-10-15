@@ -36,6 +36,7 @@ from .models import OptimizationMode
 from .orchestrator import AdaptiveContextOrchestrator
 from .security import ApiKeyService, Permission, TokenService, principal_from_api_key
 from .session_memory import AISessionMemoryService
+from .telemetry import default_telemetry_registry, reset_request_context, set_request_context
 from .token_optimizer import ContextTier, TokenEstimator
 from .session_protocol import (
     AccessDeniedError,
@@ -361,6 +362,10 @@ async def readiness_check(
     else:
         checks["orchestrator"] = "not_configured"
 
+    # Update dependency health gauges
+    default_telemetry_registry.set_dependency_health("sqlite", is_ready and engine.doc_store is not None)
+    default_telemetry_registry.set_dependency_health("orchestrator", engine.orchestrator is not None)
+
     resp_content = {
         "status": "ready" if is_ready else "not_ready",
         "service": "synapse-session-context-api",
@@ -369,6 +374,21 @@ async def readiness_check(
     }
     http_status = status.HTTP_200_OK if is_ready else status.HTTP_503_SERVICE_UNAVAILABLE
     return JSONResponse(status_code=http_status, content=resp_content)
+
+
+@router.get("/metrics", tags=["Observability"])
+async def prometheus_metrics():
+    """Export Prometheus/OpenMetrics text format metrics for monitoring scrapers."""
+    content = default_telemetry_registry.export_openmetrics()
+    return Response(content=content, media_type="text/plain; version=0.0.4; charset=utf-8")
+
+
+@router.get("/api/v1/telemetry", tags=["Observability"])
+async def telemetry_diagnostics(
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+):
+    """Export structured JSON telemetry diagnostics for observability dashboards."""
+    return default_telemetry_registry.export_json()
 
 
 @router.get("/api/v1/status", tags=["System"])
@@ -965,6 +985,16 @@ async def execute_dashboard_query(
         or orch_ctx.retrieval_metadata.get("channel_stats", {}).get("from_cache", False)
     )
 
+    # Record token governance and latency telemetry
+    default_telemetry_registry.record_token_metrics(
+        knowledge_context_tokens=knowledge_tokens,
+        query_tokens=query_tokens,
+        instruction_tokens=instruction_tokens,
+        budget=body.context_budget,
+        repository_id=body.repository_id,
+    )
+    default_telemetry_registry.record_stage_latency("aco_total", elapsed_ms, "orchestrator")
+
     return {
         "query": body.query,
         "repository_id": body.repository_id,
@@ -1041,15 +1071,42 @@ def create_app(config: SynapseConfig | None = None) -> FastAPI:
 
         req_id = request.headers.get("X-Request-ID") or f"req_{utc_now_iso()[:10]}_{int(start_time * 1000) % 1000000}"
         request.state.request_id = req_id
+        sess_id = request.headers.get("X-Session-ID")
+        tenant_id = request.headers.get("X-Tenant-ID")
 
-        http_413 = getattr(status, "HTTP_413_CONTENT_TOO_LARGE", 413)
+        ctx_tokens = set_request_context(req_id, sess_id, tenant_id)
+        http_status_code = 500
 
-        # Payload Size Check via Content-Length header
-        content_length = request.headers.get("content-length")
-        if content_length:
-            try:
-                cl_val = int(content_length)
-                if cl_val > config.max_request_payload_bytes:
+        try:
+            http_413 = getattr(status, "HTTP_413_CONTENT_TOO_LARGE", 413)
+
+            # Payload Size Check via Content-Length header
+            content_length = request.headers.get("content-length")
+            if content_length:
+                try:
+                    cl_val = int(content_length)
+                    if cl_val > config.max_request_payload_bytes:
+                        http_status_code = http_413
+                        envelope = ProtocolEnvelope(
+                            protocol_version=CURRENT_PROTOCOL_VERSION,
+                            request_id=req_id,
+                            timestamp=utc_now_iso(),
+                        )
+                        error_detail = ProtocolErrorDetail(
+                            code=ErrorCode.PAYLOAD_TOO_LARGE.value,
+                            message=f"Request payload size ({cl_val} bytes) exceeds limit of {config.max_request_payload_bytes} bytes.",
+                            retryable=False,
+                        )
+                        error_resp = ProtocolErrorResponse(envelope=envelope, error=error_detail)
+                        return JSONResponse(status_code=http_413, content=error_resp.to_dict())
+                except ValueError:
+                    pass
+
+            # Payload Size Check for body on mutating requests without Content-Length
+            if request.method in ("POST", "PUT", "PATCH") and not content_length:
+                body = await request.body()
+                if len(body) > config.max_request_payload_bytes:
+                    http_status_code = http_413
                     envelope = ProtocolEnvelope(
                         protocol_version=CURRENT_PROTOCOL_VERSION,
                         request_id=req_id,
@@ -1057,66 +1114,55 @@ def create_app(config: SynapseConfig | None = None) -> FastAPI:
                     )
                     error_detail = ProtocolErrorDetail(
                         code=ErrorCode.PAYLOAD_TOO_LARGE.value,
-                        message=f"Request payload size ({cl_val} bytes) exceeds limit of {config.max_request_payload_bytes} bytes.",
+                        message=f"Request payload size ({len(body)} bytes) exceeds limit of {config.max_request_payload_bytes} bytes.",
                         retryable=False,
                     )
                     error_resp = ProtocolErrorResponse(envelope=envelope, error=error_detail)
                     return JSONResponse(status_code=http_413, content=error_resp.to_dict())
-            except ValueError:
-                pass
 
-        # Payload Size Check for body on mutating requests without Content-Length
-        if request.method in ("POST", "PUT", "PATCH") and not content_length:
-            body = await request.body()
-            if len(body) > config.max_request_payload_bytes:
+            # Request Timeout Execution
+            try:
+                response: Response = await asyncio.wait_for(
+                    call_next(request),
+                    timeout=config.request_timeout_seconds,
+                )
+            except (asyncio.TimeoutError, TimeoutError):
+                http_status_code = status.HTTP_504_GATEWAY_TIMEOUT
+                duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
                 envelope = ProtocolEnvelope(
                     protocol_version=CURRENT_PROTOCOL_VERSION,
                     request_id=req_id,
                     timestamp=utc_now_iso(),
                 )
                 error_detail = ProtocolErrorDetail(
-                    code=ErrorCode.PAYLOAD_TOO_LARGE.value,
-                    message=f"Request payload size ({len(body)} bytes) exceeds limit of {config.max_request_payload_bytes} bytes.",
-                    retryable=False,
+                    code=ErrorCode.INTERNAL_ERROR.value,
+                    message=f"Request processing timed out after {config.request_timeout_seconds}s.",
+                    retryable=True,
                 )
                 error_resp = ProtocolErrorResponse(envelope=envelope, error=error_detail)
-                return JSONResponse(status_code=http_413, content=error_resp.to_dict())
+                timeout_resp = JSONResponse(status_code=status.HTTP_504_GATEWAY_TIMEOUT, content=error_resp.to_dict())
+                timeout_resp.headers["X-Request-ID"] = req_id
+                timeout_resp.headers["X-Response-Time-Ms"] = str(duration_ms)
+                return timeout_resp
 
-        # Request Timeout Execution
-        try:
-            response: Response = await asyncio.wait_for(
-                call_next(request),
-                timeout=config.request_timeout_seconds,
-            )
-        except (asyncio.TimeoutError, TimeoutError):
+            http_status_code = response.status_code
             duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-            envelope = ProtocolEnvelope(
-                protocol_version=CURRENT_PROTOCOL_VERSION,
-                request_id=req_id,
-                timestamp=utc_now_iso(),
+            response.headers["X-Request-ID"] = req_id
+            response.headers["X-Response-Time-Ms"] = str(duration_ms)
+            mode_str = "development-only" if config.environment == EnvironmentMode.DEVELOPMENT.value else config.environment
+            response.headers["X-Synapse-Mode"] = mode_str
+            response.headers["X-Synapse-Protocol-Version"] = CURRENT_PROTOCOL_VERSION
+            if config.environment == EnvironmentMode.DEVELOPMENT.value:
+                response.headers["X-Synapse-Security-Warning"] = (
+                    "Development mode: principal identity is simulated or header-derived; production auth is enforced in Phase 9."
+                )
+            return response
+        finally:
+            elapsed_sec = time.perf_counter() - start_time
+            default_telemetry_registry.record_http_request(
+                request.method, request.url.path, http_status_code, elapsed_sec
             )
-            error_detail = ProtocolErrorDetail(
-                code=ErrorCode.INTERNAL_ERROR.value,
-                message=f"Request processing timed out after {config.request_timeout_seconds}s.",
-                retryable=True,
-            )
-            error_resp = ProtocolErrorResponse(envelope=envelope, error=error_detail)
-            timeout_resp = JSONResponse(status_code=status.HTTP_504_GATEWAY_TIMEOUT, content=error_resp.to_dict())
-            timeout_resp.headers["X-Request-ID"] = req_id
-            timeout_resp.headers["X-Response-Time-Ms"] = str(duration_ms)
-            return timeout_resp
-
-        duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-        response.headers["X-Request-ID"] = req_id
-        response.headers["X-Response-Time-Ms"] = str(duration_ms)
-        mode_str = "development-only" if config.environment == EnvironmentMode.DEVELOPMENT.value else config.environment
-        response.headers["X-Synapse-Mode"] = mode_str
-        response.headers["X-Synapse-Protocol-Version"] = CURRENT_PROTOCOL_VERSION
-        if config.environment == EnvironmentMode.DEVELOPMENT.value:
-            response.headers["X-Synapse-Security-Warning"] = (
-                "Development mode: principal identity is simulated or header-derived; production auth is enforced in Phase 9."
-            )
-        return response
+            reset_request_context(ctx_tokens)
 
     # 3. Exception Handlers
     @app_instance.exception_handler(ProtocolException)

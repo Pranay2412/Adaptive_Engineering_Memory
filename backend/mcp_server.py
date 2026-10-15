@@ -26,6 +26,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from .api import get_protocol_engine
+from .telemetry import default_telemetry_registry
 from .security import ApiKeyService, TokenService, principal_from_api_key
 from .session_protocol import (
     AccessDeniedError,
@@ -199,6 +200,12 @@ async def synapse_query_context(
         )
 
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        try:
+            default_telemetry_registry.inc_counter('synapse_mcp_requests_total{tool="synapse_query_context",status="success"}')
+            default_telemetry_registry.record_stage_latency("mcp_query_context", duration_ms, "mcp")
+        except Exception:
+            pass
+
         logger.info(
             "[MCP_AUDIT] tool=synapse_query_context repo=%s principal=%s duration_ms=%.2f tokens=%d success=True",
             repository_id,

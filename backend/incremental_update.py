@@ -789,6 +789,14 @@ class IncrementalUpdateService:
         except Exception:
             pass
 
+        # Record ingestion job metrics to observability telemetry
+        try:
+            from .telemetry import default_telemetry_registry
+            job_duration_sec = time.perf_counter() - start_time
+            default_telemetry_registry.record_ingestion_job(repository_id, "success", job_duration_sec)
+        except Exception:
+            pass
+
         elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
         return IncrementalUpdateResult(

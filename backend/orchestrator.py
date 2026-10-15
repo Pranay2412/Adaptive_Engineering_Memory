@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -741,12 +742,15 @@ class AdaptiveContextOrchestrator:
         7. Return context plus metadata
         """
         # Step 1: Analyze query intent
+        t0 = time.perf_counter()
         intent_result = self.classifier.classify(query)
+        latency_intent_ms = round((time.perf_counter() - t0) * 1000, 2)
 
         # Step 2: Select retrieval strategy from intent
         strategy = intent_result.retrieval_strategy
 
         # Step 3: Execute hybrid retrieval
+        t1 = time.perf_counter()
         query_response = self.retrieval_service.retrieve(
             user_id=user_id,
             repository_id=repository_id,
@@ -783,8 +787,10 @@ class AdaptiveContextOrchestrator:
 
         combined_candidates = [*query_response.results, *session_mem_results]
         total_retrieved = len(combined_candidates)
+        latency_retrieval_ms = round((time.perf_counter() - t1) * 1000, 2)
 
         # Step 4: Rank retrieved information with configurable ranking
+        t2 = time.perf_counter()
         try:
             ranked_results = self.ranker.rank(
                 results=combined_candidates,
@@ -798,12 +804,14 @@ class AdaptiveContextOrchestrator:
                 intent_result=intent_result,
                 query=query,
             )
+        latency_ranking_ms = round((time.perf_counter() - t2) * 1000, 2)
 
         # Step 5: Remove duplicates
         deduped_results = deduplicate_results(ranked_results)
         total_deduped = len(deduped_results)
 
         # Step 6: Construct optimized context
+        t3 = time.perf_counter()
         token_opt_dict: dict[str, Any] | None = None
         if max_tokens is not None and self.token_optimizer is not None:
             opt_res = self.token_optimizer.optimize(
@@ -815,12 +823,26 @@ class AdaptiveContextOrchestrator:
                 llm_compressor=llm_compressor,
             )
             token_opt_dict = opt_res.to_dict()
+        latency_optimization_ms = round((time.perf_counter() - t3) * 1000, 2)
 
+        t4 = time.perf_counter()
         context_text, estimated_tokens = self.packer.pack(
             results=deduped_results,
             intent_result=intent_result,
             token_budget=max_tokens,
         )
+        latency_packing_ms = round((time.perf_counter() - t4) * 1000, 2)
+
+        # Record stage latencies to observability telemetry registry
+        try:
+            from .telemetry import default_telemetry_registry
+            default_telemetry_registry.record_stage_latency("intent_classification", latency_intent_ms)
+            default_telemetry_registry.record_stage_latency("candidate_retrieval", latency_retrieval_ms)
+            default_telemetry_registry.record_stage_latency("semantic_ranking", latency_ranking_ms)
+            default_telemetry_registry.record_stage_latency("token_optimization", latency_optimization_ms)
+            default_telemetry_registry.record_stage_latency("knapsack_packing", latency_packing_ms)
+        except Exception:
+            pass
 
         # Step 7: Return context plus detailed retrieval metadata
         ranking_weights = (
@@ -847,6 +869,13 @@ class AdaptiveContextOrchestrator:
             "estimated_tokens": estimated_tokens,
             "channel_stats": query_response.retrieval_stats,
             "from_cache": bool(query_response.retrieval_stats.get("from_cache", False)),
+            "stage_latencies_ms": {
+                "intent_classification": latency_intent_ms,
+                "candidate_retrieval": latency_retrieval_ms,
+                "semantic_ranking": latency_ranking_ms,
+                "token_optimization": latency_optimization_ms,
+                "knapsack_packing": latency_packing_ms,
+            },
             "token_optimization": token_opt_dict,
         }
 

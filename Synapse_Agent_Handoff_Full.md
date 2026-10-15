@@ -712,8 +712,13 @@ and artifacts.
                                                   tests/test_deployment_smoke.py (6 passed);
                                                   full test suite (410 passed)
 
-  Phase 18 ---            Planned                 Logs/metrics verification
-  Observability                                   
+  Phase 18 ---            Complete (15-10-2026)   backend/telemetry.py;
+  Observability                                   backend/api.py (/metrics, /api/v1/telemetry);
+                                                  backend/orchestrator.py (stage latencies);
+                                                  backend/mcp_server.py; backend/incremental_update.py;
+                                                  docs/observability/metric_definitions_and_runbook.md;
+                                                  tests/test_observability.py (7 passed);
+                                                  full test suite verified (417 passed)
 
   Phase 19 --- Security   Planned                 Threat model and test
                                                   evidence
